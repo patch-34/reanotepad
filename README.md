@@ -116,6 +116,4 @@ See [CHANGELOG.md](CHANGELOG.md), [release notes](RELEASE_NOTES.md) and the [rel
 
 Author: [Aleksei Vorobev / Patch34](https://github.com/patch-34).
 
-UI components and palette are adapted from Podcast HTML/DOCX Script Viewer v3.1.0-beta.1, with adjustments for this notes editor. The viewer is not required. The interface uses [ReaImGui](https://github.com/cfillion/reaimgui).
-
-No software license has been selected for this package.
+MIT license
