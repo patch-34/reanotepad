@@ -1,49 +1,42 @@
-# ReaNotepad v0.5.0
+# ReaNotepad v0.5.4
 
 ## English
 
-Organize REAPER project, track and item notes into tabs and resizable columns, with text blocks, checkbox notes and editable dropdowns. Notes stay with the project.
+### Changes since 0.5.0
 
-Previously named Patch34 Project Notes, the script is now **ReaNotepad**. Existing notes and settings remain compatible.
+- Column headings provide quick-action icons for text, checkbox notes, dropdowns and import, with localized tooltips.
+- Multiple selection supports confirmed bulk deletion and color assignment within a column. All/Clear operates on visible blocks only.
+- Six color markers are available for individual or selected blocks. Markers appear as a narrow strip beside the content.
+- Bulk deletion and marker changes support single-step Undo/Redo.
+- Column controls and selection actions adapt to narrow columns.
 
-Version 0.5.0 brings the UI and reliability changes developed since 0.4.0:
+### Requirements
 
-- Podcast Viewer styling, consistent compact controls, clearer Dark-theme tabs and corrected menu/popup sizing.
-- English/Russian interface, a compact About window and a Help link to [the repository](https://github.com/patch-34/reanotepad).
-- Landscape import with controls at the top left and standard-size hints at the top right; equally aligned source and preview fields below, with muted empty-preview text.
-- Stable document UI identifiers on language changes and a short transparent startup layout phase.
-- Right-click tab deletion, consistent dialog backgrounds and a fix for the extra scrollbar during tab renaming.
-- Named Undo/Redo actions that include text editing, with typing and deletion grouped into steps.
-- Recovery copies and previewed restoration, without emergency overwrites of native notes.
-- More conservative numbered-list import and lower memory use for inactive documents.
-- Fixes for the tab-renaming crash and brief narrow-column frames during UI changes.
+REAPER 7 or later; ReaImGui 0.10 or later.
 
-Requires **REAPER 7+ and ReaImGui 0.10+**. Extract the archive and load `ReaNotepad_v0.5.0.lua` through **Actions → Show action list → New action → Load ReaScript**. Stop the previous version before updating. Save the REAPER project to keep notes on disk. Storage remains compatible with 0.4.x; no manual conversion is needed.
+### Format compatibility
 
-All 18 automated suites pass on 0.5.0 using Lua and simulated host APIs. Manual REAPER testing was reported successful for 0.4.13; the subsequent session optimization and final UI revisions have automated coverage. Cross-platform host compatibility has not been certified.
+Uncolored documents retain their existing storage format. Color markers use optional `@color` directives in v2. Versions through 0.5.3 open documents containing these directives read-only. Remove all markers in 0.5.4 before editing such a document with an earlier version.
 
-See [README.md](README.md) for installation, history behavior and recovery details.
+[User manual](README.md)
 
 ## Русский
 
-Заметки к проектам, дорожкам и айтемам REAPER с вкладками, колонками изменяемой ширины, текстом, заметками с чекбоксами и редактируемыми списками. Заметки сохраняются вместе с проектом.
+### Изменения относительно 0.5.0
 
-Теперь скрипт называется **ReaNotepad**; прежнее название — Patch34 Project Notes. Существующие заметки и настройки совместимы с новой версией.
+- В заголовках колонок добавлены значки быстрого создания текста, заметок с чекбоксами, выпадающих списков и импорта. Подсказки соответствуют выбранному языку.
+- Выделение нескольких блоков позволяет удалять их с подтверждением и назначать цвет в пределах колонки. «Все / Снять» действует только на видимые блоки.
+- Для отдельных и выделенных блоков доступны шесть цветовых меток. Метка отображается узкой полоской сбоку от содержимого.
+- Массовое удаление и изменение меток поддерживают отмену и повтор одной операцией.
+- Управление колонками и панель выделения адаптированы к узким колонкам.
 
-Версия 0.5.0 объединяет изменения интерфейса и надёжности, сделанные после 0.4.0:
+### Требования
 
-- Оформление Podcast Viewer, согласованные компактные кнопки, более заметные активные вкладки в тёмной теме и исправленные размеры меню и диалогов.
-- Русский и английский интерфейс, компактное окно информации о программе и переход из справки в [репозиторий](https://github.com/patch-34/reanotepad).
-- Горизонтальное окно импорта: настройки сверху слева, подсказки стандартного размера справа, под ними два поля одной высоты. Подсказка в пустом предпросмотре приглушена.
-- Сохранение элементов документа при смене языка и короткая скрытая подготовка разметки при открытии.
-- Удаление вкладки по правому щелчку, единый фон диалогов и исправление лишней прокрутки при переименовании вкладки.
-- Подписанные действия отмены/повтора, включая ввод и удаление текста с объединением последовательных правок.
-- Аварийные копии и восстановление с предпросмотром, без аварийной перезаписи стандартных заметок.
-- Более осторожное распознавание нумерации при импорте и освобождение памяти неактивных документов.
-- Исправления падения при переименовании вкладки и краткого появления узких колонок при изменениях интерфейса.
+REAPER 7 или новее; ReaImGui 0.10 или новее.
 
-Нужны **REAPER 7+ и ReaImGui 0.10+**. Распакуй архив и загрузи `ReaNotepad_v0.5.0.lua` через **Actions → Show action list → New action → Load ReaScript**. Перед обновлением останови старую версию. Сохраняй проект REAPER, чтобы записать заметки на диск. Формат совместим с 0.4.x, ручное преобразование не требуется.
+### Совместимость формата
 
-Все 18 наборов автоматических тестов проходят на 0.5.0 с Lua и имитацией API хоста. Для 0.4.13 подтверждена успешная ручная проверка в REAPER; последующая оптимизация сессий и финальные правки интерфейса покрыты автоматическими тестами. Совместимость на всех платформах не подтверждалась.
+Документы без меток сохраняют прежний формат хранения. Цветовые метки используют необязательные директивы `@color` формата v2. Версии до 0.5.3 включительно открывают такие документы только для чтения. Для редактирования в более ранней версии необходимо предварительно удалить все метки в 0.5.4.
 
-Установка, работа истории и восстановление описаны в [README_RU.md](README_RU.md).
+[Руководство пользователя](README_RU.md)
+

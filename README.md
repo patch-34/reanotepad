@@ -2,118 +2,176 @@
 
 **English** · [Русский](README_RU.md)
 
-**Version 0.5.0** · A Lua ReaScript by Aleksei Vorobev / Patch34.
+**Version 0.5.4** · [Downloads](https://github.com/patch-34/reanotepad/releases) · [Changelog](CHANGELOG.md)
 
-Organize REAPER project, track and item notes into tabs and resizable columns. Add text blocks, multiline notes with completion checkboxes, and dropdown fields with editable choices. Notes are stored with the REAPER project. Earlier names were ReaNotebook and Patch34 Project Notes.
+ReaNotepad is a structured notes editor for REAPER projects, tracks and items. Documents contain tabs, resizable columns, text blocks, checkbox notes and dropdown fields. Notes are stored in the REAPER project.
 
 ![ReaNotepad in REAPER](assets/screenshot.png)
 
-## Requirements and installation
+## Requirements
 
-- REAPER 7 or newer.
-- ReaImGui 0.10 or newer, available through [ReaPack](https://reapack.com/).
-
-SWS is not required. The script runs from one Lua file.
-
-1. Install ReaImGui through ReaPack. Restart REAPER if prompted.
-2. Extract the archive and copy `ReaNotepad_v0.5.0.lua` into a permanent folder, such as `Scripts` in the REAPER resource directory. Open that directory through **Options → Show REAPER resource path in explorer/finder**.
-3. Open **Actions → Show action list**, select the Main section, then **New action → Load ReaScript** and select the Lua file.
-4. Run the script. Assign a shortcut or toolbar button in the Action List if needed.
-
-When updating, stop the older script first. If its filename has changed, load the new file and update shortcuts or toolbar assignments that point to the old action. Run only one version at a time. Documentation is not needed at runtime.
-
-## Where notes are stored
-
-Choose **Project / Track / Item** at the top. Track and Item follow the REAPER selection and require exactly one selected object. The master track is supported. Every object has its own document and Undo/Redo history.
-
-| Mode | Storage |
+| Component | Version |
 | --- | --- |
-| Project | Native project notes |
-| Track | Track extension data (`P_EXT:PATCH34_PROJECT_NOTES`) in the `.rpp` project |
-| Item | Native item notes (`P_NOTES`) |
+| REAPER | 7 or later |
+| ReaImGui | 0.10 or later |
 
-Edits update the open project immediately. **Save the REAPER project to keep them on disk.** Track notes are independent of SWS Track Notes. Normal editing creates no separate note files; error recovery can create copies as described below.
+ReaImGui is available through [ReaPack](https://reapack.com/).
 
-Existing plain notes appear as a text block. Opening them does not rewrite the original text. The first edit saves a structured document with readable text and structural markers. Keep those markers intact when using another notes editor. Earlier v1 documents are read without modification and converted on edit. Version 0.5.0 keeps the v2 storage format used by 0.4.x. The rename preserves existing note fields, settings and recovery paths; their internal Patch34 identifiers remain for compatibility.
+## Installation
 
-## Edit and organize
+1. Install ReaImGui through ReaPack.
+2. Download the release archive and extract `ReaNotepad_v0.5.4.lua` to the REAPER `Scripts` directory. The resource directory is available under **Options → Show REAPER resource path in explorer/finder**.
+3. Open **Actions → Show action list** and select the **Main** section.
+4. Select **New action → Load ReaScript**, then open `ReaNotepad_v0.5.4.lua`.
+5. Select the registered action and click **Run**.
 
-Enable **Edit** to edit text and expose column controls. Turn it off for wrapped reading. Checkboxes and dropdown choices remain interactive in either mode.
+## Documents and storage
 
-- The **Tab** menu adds, renames, reorders and deletes tabs. Right-click any tab for **Delete tab…**; deletion asks for confirmation and can be undone. The last remaining tab cannot be deleted. Double-click a tab to rename it in place: Enter or a click outside applies; Esc cancels.
-- **Add → Column** adds a column, up to eight per tab. Drag column boundaries to redistribute width. Double-click a column name to rename it in a dialog.
-- Each column's **Add** menu inserts blocks into that column. The main **Add** menu offers a column choice when needed.
-- A block's **…** menu moves it up/down, moves it to another column, edits a dropdown field, or deletes the block.
+The selector in the top toolbar sets the note scope.
 
-| Block | Use |
+| Scope | Note owner | Storage |
+| --- | --- | --- |
+| Project | Current project | Native project notes |
+| Track | One selected track, including the master track | Track extension data in the `.rpp` file |
+| Item | One selected item | Native item notes |
+
+Track and Item modes follow the REAPER selection. Each owner has an independent document and Undo/Redo history.
+
+Edits are written to the open project. Save the REAPER project to persist them to disk.
+
+Existing plain-text notes are displayed as a text block. Opening notes does not change their contents. The first edit converts plain text to the structured notes format.
+
+## Tabs, columns and blocks
+
+A document contains tabs. Each tab supports up to eight columns.
+
+| Operation | Control |
 | --- | --- |
-| Text | A multiline text block |
-| Note with checkbox | A multiline task or note with a completion checkbox |
-| Dropdown | A named field with editable choices |
+| Create, rename, reorder or delete tabs | **Tab** menu |
+| Rename a tab inline | Double-click the tab |
+| Delete a specific tab | Right-click the tab → **Delete tab…** |
+| Add a column | **Add → Column** |
+| Resize columns | Drag the divider between columns |
+| Rename a column | Double-click its name, or **… → Rename column…** |
+| Move or delete a column | Column **…** menu |
 
-The separate Checkbox creation command has been removed. Checkbox blocks saved by older versions remain supported.
+For inline tab renaming, Enter or a click outside the field applies the name; Esc cancels. The last tab cannot be deleted. Column width proportions are retained for the current session.
 
-Use **Edit…** beside a dropdown’s properties button, or **… → Edit field…** to change its name, add or reorder options, and set the selected value. Apply a dialog to save its draft; Esc or a click outside cancels it. Switching to another project, track or item also cancels unapplied dialogs and inline tab renames.
+The icons in each column heading create or import blocks in that column. Hovering over an icon displays its action name.
 
-## Import text
+| Action | Result |
+| --- | --- |
+| Text | Multiline text block |
+| Note with checkbox | Multiline note with a completion checkbox |
+| Dropdown | Named field with editable options |
+| Import text | Text import dialog |
 
-Choose **Edit → Import text…**, or **Import text…** in a column's Add menu. In the landscape dialog, choose the destination column and numbering option at the top left; the hints use the standard interface text size on the right, with extra space before the panel headings. The shorter dialog keeps Import and Cancel close below the panels. Paste text in the lower-left field and review the resulting notes in the equally sized panel on the right. Its grey empty-state message is a hint, not an editable field. Click **Import** to add the notes.
+The top-level **Add** menu provides the same block types. A block's **…** menu contains movement, color and deletion commands.
 
-- Blank lines separate paragraphs. Recognized list entries can contain continuation lines.
-- Without blank lines or recognized numbering, each nonempty line becomes a note.
-- Markers include `1.`, `2)`, `(3)`, `[4]`, `5:`, `6 —` and dotted forms such as `1.2.` when followed by whitespace and text.
-- Bare numbers such as `1 First` and `2 Second` require a consecutive sequence. Isolated numbers, years, dates and decimal values are treated conservatively to avoid removing ordinary text.
-- **Remove numbering** is enabled by default; disable it to keep prefixes.
+### Editing
 
-Preview the result before importing. Imported paragraphs become unchecked notes appended to the selected column. One Undo removes the whole import.
+Enable **Edit** in the top toolbar to edit text and display column controls. With Edit disabled, text is displayed with word wrapping. Completion checkboxes and dropdown values remain interactive in both modes. Text-editing fields use horizontal scrolling.
 
-## Appearance and language
+For dropdown configuration, select **Edit…** beside the field name or **… → Edit field…**. The dialog supports renaming the field, editing and reordering options, and setting the selected value.
 
-**Hide completed** hides checked notes and older checkbox blocks without deleting them. Turn it off to show them again.
+**Apply** commits a dialog. Esc or a click outside cancels it. Changing the note owner cancels unapplied dialogs and inline tab renaming.
 
-The **Font** slider controls note text size from 12 to 32 pixels. Interface text uses the default UI font independently. **View** offers Pages, REAPER Grey, Google Docs White and Dark themes. Choose **View → Language → English / Русский** to change the interface language; note contents and user-defined names are unchanged.
+## Multiple selection
 
-Right-click the top toolbar and choose **Dock to docker** to dock or undock. The script remembers its last docker. **Help → About…** shows the version and author link. **Help → Help…** opens the [ReaNotepad repository](https://github.com/patch-34/reanotepad). The About window fits its text and has a Close button on the right. The current project name is shown in the window title.
+1. Enable **Edit**.
+2. Open the column's **… → Select elements…** menu command.
+3. Click blocks to select or deselect them. Selected blocks display an outline and a corner check mark.
+4. Use the selection toolbar to apply an operation.
+
+| Control | Function |
+| --- | --- |
+| All / Clear selection | Select or deselect all visible blocks in the column |
+| Color… | Assign or remove a color marker |
+| Delete… | Delete selected blocks after confirmation |
+| Done | Exit selection mode |
+
+Block contents are read-only during selection. Each bulk deletion or color assignment is a single Undo/Redo operation. In narrow columns, toolbar controls wrap or use icons with tooltips.
+
+Enabling **Hide completed** removes newly hidden blocks from the selection. Selection is cleared by changing the owner or tab, loading external note changes, using Undo/Redo, or leaving Edit mode. Esc exits selection mode; when a deletion confirmation is open, it cancels that dialog first.
+
+## Color markers
+
+For an individual block, use **… → Color marker**. For multiple blocks, use **Color…** in the selection toolbar.
+
+Available markers: red, orange, yellow, green, blue and purple. **No marker** removes the marker. Colors are not assigned fixed priority values.
+
+A marker is displayed as a narrow strip at the left edge of the block. The text and background retain their standard colors. Marker changes are saved with the document and support Undo/Redo.
+
+## Text import
+
+Open **Edit → Import text…** or select the import icon in a column heading.
+
+1. Select the destination column.
+2. Paste source text into the left field.
+3. Set **Remove numbering** and review the result in the right pane.
+4. Select **Import**.
+
+Imported entries are appended as unchecked notes. The complete import is one Undo/Redo operation.
+
+Parsing rules:
+
+- Blank lines separate paragraphs. Numbered list entries may include continuation lines.
+- Without blank lines or recognized numbering, each nonempty line becomes a separate note.
+- Supported markers include `1.`, `2)`, `(3)`, `[4]`, `5:`, `6 —` and compound forms such as `1.2.`.
+- Numbers without punctuation require a consecutive sequence. Isolated numbers, years, dates and decimal values are retained when not recognized as list numbering.
+- **Remove numbering** is enabled by default.
+
+## View and language
+
+| Setting | Function |
+| --- | --- |
+| Hide completed | Hide completed checkbox notes without deleting them |
+| Font | Set note text size from 12 to 32 px |
+| View → theme | Select Pages, REAPER Grey, Google Docs White or Dark |
+| View → Language | Select English or Russian |
+| Toolbar context menu → Dock to docker | Dock or undock the window |
+
+Interface font size is independent of note text size. Language changes apply to interface controls; document text and user-defined names are preserved.
 
 ## Undo and Redo
 
-Use **Edit → Undo / Redo**. Menu entries name the next action, such as typing, pasting, importing or renaming.
+The **Edit** menu displays the next Undo and Redo actions.
 
 | Action | Windows / Linux | macOS |
 | --- | --- | --- |
 | Undo | Ctrl+Z | Cmd+Z |
 | Redo | Ctrl+Shift+Z or Ctrl+Y | Cmd+Shift+Z or Cmd+Y |
 
-Text edits participate in document history. Consecutive typing or deletion in the same field is grouped while edits are less than 0.8 seconds apart. Moving the caret or selection, changing fields, pasting, cutting, replacing a selection or inserting a line break separates edits into steps. Adding, deleting, moving and renaming content, checking notes and choosing dropdown values also enter history.
+History includes text edits, structural changes, completion states, dropdown selections, imports, color markers and restoration. Consecutive typing or deletion in the same field is grouped with a pause threshold of approximately 0.8 seconds. Caret movement, selection changes, paste, cut, replacement and line breaks separate editing operations.
 
-Dialog drafts use their own text-editing history. Applying a dialog records the resulting document change. Theme, font size, language, the completed-note filter and Edit mode are preferences, outside document Undo/Redo.
+History is maintained independently for each note owner during the script session. Each stack retains up to 100 entries, subject to an approximate 16 MiB limit. Restarting the script or loading external changes resets the relevant history. Appearance settings are not included in document history.
 
-History belongs to each project, track or item and lasts for the current script session. Switching objects preserves it, including when an inactive document is unloaded from memory. Restarting the script or loading an external change resets the affected history. Each Undo/Redo stack is limited to 100 entries and approximately 16 MiB, while retaining at least its newest entry.
+## Recovery
 
-## Recovery and external edits
+Malformed or unsupported structured notes are opened read-only. External changes are loaded when no local edits are pending. Conflicting changes suspend writing and display a diagnostic message.
 
-Malformed or unsupported structured notes open read-only. The script reloads external note edits when it has no pending local changes; it reports conflicting changes instead of silently overwriting them. Writes validate the target object and check the stored contents.
+The recovery directory is:
 
-On errors, the script attempts to save separate recovery files under:
+```text
+<REAPER resource directory>/Data/Patch34_Project_Notes_Recovery/
+```
 
-`<REAPER resource directory>/Data/Patch34_Project_Notes_Recovery/`
+Recovery files may include original notes, the local draft, pending dialog text and a diagnostic report.
 
-Copies may include the original notes, the local draft, an attempted write, pending dialog text and a diagnostic report. An error does not trigger an emergency overwrite of native notes. Recovery files may contain an incomplete operation: inspect them before restoring.
+To restore notes, select **Edit → Open recovery copy…**, open a `.notes` file, review the preview and select **Restore**. The copy replaces the current owner's document. Restoration supports Undo/Redo.
 
-Choose **Edit → Open recovery copy…**, select a `.notes` file, review the preview and explicitly restore it into the currently selected note owner. Restoration is undoable. Recovery copies are local files and can contain your note text.
+## Format compatibility
 
-## Limits and validation
+- Storage format: v2. Version v1 documents are converted on edit.
+- Color markers use optional `@color` directives. Versions through 0.5.3 open documents containing these directives read-only. Remove all markers in 0.5.4 before editing the document with an earlier version.
+- Legacy checkbox blocks remain supported.
+- Internal Patch34 storage keys are retained for compatibility with existing notes and settings.
 
-- Long lines wrap in Read mode; native Edit fields scroll horizontally.
-- Column width proportions are session state, not part of the stored document.
-- History is not saved across script restarts. Very large documents and histories can still consume substantial memory.
-- Older versions predating 0.4.0 cannot read multiline checkbox-note blocks.
-- All 18 automated test suites pass against the 0.5.0 script. They use Lua and simulated REAPER/ReaImGui APIs. Manual REAPER testing was reported successful for 0.4.13; the later session optimization and final UI revisions were checked automatically. No platform/version compatibility matrix has been recorded.
-
-See [CHANGELOG.md](CHANGELOG.md), [release notes](RELEASE_NOTES.md) and the [release checklist](docs/RELEASE_CHECKLIST.md).
-
-## Credits
+## License and credits
 
 Author: [Aleksei Vorobev / Patch34](https://github.com/patch-34).
 
-MIT license
+ReaNotepad is distributed under the [MIT License](LICENSE).
+
+Interface: [ReaImGui](https://github.com/cfillion/reaimgui). Icons: [Lucide](https://lucide.dev/). Third-party icon licenses are included in [LUCIDE_LICENSE.txt](docs/licenses/LUCIDE_LICENSE.txt).
+

@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.5.4 — 2026-10-29
+
+### Documentation
+
+- Rewritten English and Russian user manuals.
+- Added the project MIT license and the repository screenshot to the release package.
+
+### Added
+
+- Column properties → Select elements: full-block selection, visible-only All/Clear, color assignment and confirmed bulk deletion.
+- Single-block and bulk color markers in six preset colors, displayed as a narrow strip at the left edge while keeping the normal block background.
+- Named, single-step Undo/Redo for bulk deletion and marker assignment.
+- Compact Lucide icon fallbacks for selection actions in narrow columns.
+
+### Storage and selection
+
+- Color keys are saved as optional @color directives in storage v2. Existing uncolored notes keep the same serialization. Versions through 0.5.3 open documents containing markers read-only; remove all markers with 0.5.4 before downgrading.
+- Selection is temporary and local to one column. Hidden completed blocks are pruned from it. Selection clears on owner/tab changes, Undo/Redo, leaving Edit mode and external document replacement.
+- Selection mode displays block contents without editable fields, checkboxes or active dropdowns. Done or Esc exits; Esc first cancels an open deletion confirmation.
+
+## 0.5.3 — 2026-10-29
+
+### Changed
+
+- Made action symbols distinct: square-check for checkbox notes, list-chevrons-down-up for dropdowns, and file-input for import.
+- Replaced the import tray/down-arrow with an arrow entering a document.
+- Kept button order, actions, tooltips, sizing and stroke weight unchanged.
+
+## 0.5.2 — 2026-10-29
+
+### Changed
+
+- Replaced custom quick-action drawings with Lucide type, list-todo, square-chevron-down and import icons.
+- Used a lighter 1.5 px source stroke, embedded high-resolution masks and theme-aware tinting. Installation still requires only the Lua file.
+- Included original SVG sources and third-party icon licenses.
+
+## 0.5.1 — 2026-10-29
+
+### Changed
+
+- Replaced each column's Add menu button with quick actions for text, checkbox notes, dropdowns and text import.
+- Added English/Russian hover tooltips. Icon buttons use the existing button styling and text color.
+- Wrapped column actions when space is limited and retained identical header geometry in Read and Edit modes.
+- Kept the top-level Add menu and column properties menu.
+
 ## 0.5.0 — 2026-10-29
 
 Consolidates the 0.4.1–0.4.14 development updates. Storage remains v2; no document migration is required for 0.4.x notes.
@@ -41,12 +86,6 @@ Consolidates the 0.4.1–0.4.14 development updates. Storage remains v2; no docu
 - Popup content and action placement in small windows.
 - Brief narrow-column frames after switching tabs, themes or Undo/Redo.
 - Error handling that could attempt an emergency write to native notes; recovery now uses separate copies.
-
-### Release package
-
-- Updated English and Russian READMEs, each with a screenshot placeholder.
-- Added bilingual release notes and an updated validation/handoff checklist.
-- All 18 automated suites pass against 0.5.0. Host checks and their limits are recorded in the checklist.
 
 ## 0.4.0
 
