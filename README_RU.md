@@ -116,6 +116,4 @@ SWS не требуется. Для работы нужен один Lua-фай�
 
 Автор: [Aleksei Vorobev / Patch34](https://github.com/patch-34).
 
-Компоненты интерфейса и палитра адаптированы из Podcast HTML/DOCX Script Viewer v3.1.0-beta.1 с изменениями для редактора заметок. Сам Viewer не требуется. Интерфейс работает на [ReaImGui](https://github.com/cfillion/reaimgui).
-
-Лицензия на программный код для этого пакета пока не выбрана.
+Лицензия MIT
