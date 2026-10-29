@@ -6,10 +6,6 @@
 
 Organize REAPER project, track and item notes into tabs and resizable columns. Add text blocks, multiline notes with completion checkboxes, and dropdown fields with editable choices. Notes are stored with the REAPER project. Earlier names were ReaNotebook and Patch34 Project Notes.
 
-## Screenshot
-
-> Screenshot coming soon.
-
 ![ReaNotepad in REAPER](assets/screenshot.png)
 
 ## Requirements and installation
