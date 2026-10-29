@@ -10,8 +10,7 @@ Organize REAPER project, track and item notes into tabs and resizable columns. A
 
 > Screenshot coming soon.
 
-<!-- Add docs/images/screenshot.png, then uncomment the next line and remove the placeholder above. -->
-<!-- ![ReaNotepad in REAPER](docs/images/screenshot.png) -->
+![ReaNotepad in REAPER](assets/screenshot.png)
 
 ## Requirements and installation
 
