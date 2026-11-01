@@ -1,5 +1,5 @@
 -- @description ReaNotepad
--- @version 0.5.9
+-- @version 0.5.11
 -- @author Aleksei Vorobev / Patch34
 -- @about
 --   Structured notes for REAPER projects, tracks and items.
@@ -765,7 +765,7 @@ local UI_METRICS = {
   dropdown_width=420,
   confirm_min_width=280, confirm_max_width=520,
   read_line_gap=2, popup_margin=12, popup_footer_gap=8,
-  popup_sizes={restore={580,460},name={410,150},select={500,460},import={860,440},about={360,210}},
+  popup_sizes={restore={580,460},name={320,110},select={500,460},import={860,440},about={360,210}},
 }
 local language=reaper.GetExtState(PREF,'language')=='ru' and 'ru' or 'en'
 local pending_language, pending_theme
@@ -829,7 +829,7 @@ local RU = {
   ["Edit field..."]="Изменить поле…",
   ["Delete..."]="Удалить…",
   ["Edit..."]="Изменить…",
-  ["Edit notes"]="Редактировать",
+  ["Edit notes"]="Правка",
   ["Rename column..."]="Переименовать колонку…",
   ["Move column left"]="Колонку влево",
   ["Move column right"]="Колонку вправо",
@@ -1073,7 +1073,7 @@ local function save_recovery(s,reason,baseline,pending)
     local target=s and s.target or {}
     local title_ok,title=pcall(api.title,target)
     local report=table.concat({
-      'ReaNotepad 0.5.9 — recovery / аварийная копия',
+      'ReaNotepad 0.5.11 — recovery / аварийная копия',
       'Owner / Объект: '..(title_ok and title or tostring(target.key)),
       'Kind / Тип: '..tostring(target.kind),'GUID: '..tostring(target.guid),
       'Session key / Ключ сеанса: '..tostring(target.key),
@@ -1262,7 +1262,8 @@ local function styles()
     ScrollbarGrabActive=v.C_SCROLL_A,Tab=t.chrome,TabHovered=t.hover,TabSelected=theme=='dark' and t.hover or t.paper,
     TabDimmed=t.chrome,TabDimmedSelected=theme=='dark' and t.hover or t.paper,
     TabSelectedOverline=t.accent,TextSelectedBg=(t.accent & 0xffffff00)|65,
-    SliderGrab=t.accent,SliderGrabActive=t.accent}
+    SliderGrab=t.accent,SliderGrabActive=t.accent,
+    ModalWindowDimBg=rgba(0,0,0,theme=='dark' and 140 or 90)}
   local count=0
   for k,v in pairs(colors) do ImGui.PushStyleColor(ctx,ImGui['Col_'..k],v); count=count+1 end
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,UI_METRICS.window_pad_x,UI_METRICS.window_pad_y)
@@ -1301,44 +1302,20 @@ function UI.slider(id, value, min_value, max_value, width, reset_value)
   local is_hovered = ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_None)
 
   local dc_state = UI.slider_state
-  local reset_by_double_click = false
-  if reset_value ~= nil
-     and is_hovered
-     and ImGui.IsMouseDoubleClicked(ctx, ImGui.MouseButton_Left) then
-    new_value = UI.clamp(reset_value, min_value, max_value)
-    changed = (new_value ~= value)
-    reset_by_double_click = true
-    dc_state.suppress_drag_id = id
-    dc_state.suppress_until_mouse_up = true
-    dc_state.suppress_frames = 2
+  if reset_value~=nil and is_hovered and ImGui.IsMouseDoubleClicked(ctx,0) then
+    dc_state.reset_id=id
   end
-
-  local suppress_drag = false
-  if not reset_by_double_click and dc_state.suppress_drag_id == id then
-    if dc_state.suppress_until_mouse_up and ImGui.IsMouseDown(ctx, ImGui.MouseButton_Left) then
-      suppress_drag = true
-    elseif dc_state.suppress_frames and dc_state.suppress_frames > 0 then
-      suppress_drag = true
-      dc_state.suppress_frames = dc_state.suppress_frames - 1
-    else
-      dc_state.suppress_drag_id = nil
-      dc_state.suppress_until_mouse_up = false
-      dc_state.suppress_frames = 0
-    end
+  if dc_state.reset_id==id then
+    if ImGui.IsMouseReleased(ctx,0) then
+      dc_state.reset_id=nil
+      if is_hovered then new_value=UI.clamp(reset_value,min_value,max_value) end
+    elseif not ImGui.IsMouseDown(ctx,0) then dc_state.reset_id=nil end
+  elseif is_active then
+    local mouse_x=ImGui.GetMousePos(ctx)
+    local t=math.max(0,math.min(1,(mouse_x-track_x1)/track_width))
+    new_value=UI.clamp(min_value+(max_value-min_value)*t,min_value,max_value)
   end
-
-  if is_active and not reset_by_double_click and not suppress_drag then
-    local mouse_x = ImGui.GetMousePos(ctx)
-    local t = 0
-    if width > 0 and max_value > min_value then
-      t = (mouse_x - track_x1) / track_width
-    end
-    if t < 0 then t = 0 end
-    if t > 1 then t = 1 end
-
-    new_value = UI.clamp(min_value + (max_value - min_value) * t, min_value, max_value)
-    changed = (new_value ~= value)
-  end
+  changed=(new_value~=value)
 
   local t = 0
   if max_value > min_value then
@@ -1845,6 +1822,76 @@ function UI.confirm_geometry(title,message)
     math.max(delete_h,cancel_h)+3*UI_METRICS.item_gap_y)
   return width,height
 end
+function UI.name_geometry(title)
+  local apply_w,button_h=UI.button_size(tr('Apply'))
+  local cancel_w=UI.button_size(tr('Cancel'))
+  local width=math.max(UI_METRICS.popup_sizes.name[1],
+    ImGui.CalcTextSize(ctx,tr(title))+2*UI_METRICS.window_pad_x,
+    apply_w+cancel_w+UI_METRICS.item_gap_x+2*UI_METRICS.window_pad_x)
+  local height=2*UI_METRICS.window_pad_y+ImGui.GetTextLineHeight(ctx)+1+
+    ImGui.GetFrameHeight(ctx)+button_h+4*UI_METRICS.item_gap_y
+  return math.ceil(width),math.ceil(height)
+end
+-- Keep native selection, overflow scrolling and keyboard navigation. Suppress
+-- only the tab header's mouse-down action; never disable its document contents.
+function UI.release_tab_item(caption,id,flags)
+  local held=ImGui.IsMouseDown(ctx,0) or ImGui.IsMouseDown(ctx,1)
+  local block_mouse=held or ImGui.IsMouseReleased(ctx,1)
+  if block_mouse then
+    ImGui.PushStyleVar(ctx,ImGui.StyleVar_DisabledAlpha,1)
+    ImGui.BeginDisabled(ctx,true)
+  end
+  local visible=ImGui.BeginTabItem(ctx,caption,nil,flags)
+  local hovered=ImGui.IsItemHovered(ctx,block_mouse and ImGui.HoveredFlags_AllowWhenDisabled or 0)
+  if block_mouse then ImGui.EndDisabled(ctx);ImGui.PopStyleVar(ctx) end
+  if startup_layout_frames>=STARTUP_LAYOUT_FRAMES then
+    if hovered and ImGui.IsMouseClicked(ctx,0) then
+      UI.tab_press={id=id,owner=session,epoch=epoch}
+    end
+    local press=UI.tab_press
+    if ImGui.IsMouseReleased(ctx,0) and press and press.id==id then
+      UI.tab_press=nil
+      if hovered and press.owner==session and press.epoch==epoch then force_tab=id end
+    end
+  end
+  return visible,hovered
+end
+-- Recognize a double-click on press; perform its action on the second release.
+function UI.double_click_released(key,hovered)
+  -- ReaImGui 0.10 does not expose ImGui.GetID. Use a stable UI-local key.
+  local id=key
+  if hovered and ImGui.IsMouseDoubleClicked(ctx,0) then
+    UI.double_press={id=id,owner=session,epoch=epoch}
+  end
+  local press=UI.double_press
+  if ImGui.IsMouseReleased(ctx,0) and press and press.id==id then
+    UI.double_press=nil
+    return hovered and press.owner==session and press.epoch==epoch
+  end
+  return false
+end
+-- Native modal dimming with outside-click cancellation. Check nested popups
+-- before rendering them, so selecting an option outside the modal is safe.
+function UI.modal_cancelled(m)
+  local nested=ImGui.IsPopupOpen(ctx,'',ImGui.PopupFlags_AnyPopupId)
+  local x,y=ImGui.GetWindowPos(ctx)
+  local w,h=ImGui.GetWindowSize(ctx)
+  local mx,my=ImGui.GetMousePos(ctx)
+  local outside=mx<x or mx>=x+w or my<y or my>=y+h
+  for button=0,1 do
+    if ImGui.IsMouseClicked(ctx,button) then
+      m.outside_press=outside and not nested and button or nil
+    end
+    if m.outside_press==button and ImGui.IsMouseReleased(ctx,button) then
+      m.outside_press=nil
+      if outside and not nested then return true end
+    end
+  end
+  return escape_pressed
+end
+function UI.help_url()
+  return REPOSITORY_URL..'/blob/main/'..(language=='ru' and 'README_RU.md' or 'README.md')
+end
 function UI.toolbar_next(row,width)
   if row.used>0 and row.used+UI_METRICS.group_gap+width<=row.width then
     ImGui.SameLine(ctx,0,UI_METRICS.group_gap)
@@ -2038,7 +2085,7 @@ end
 function UI.show_info(kind) UI.info=kind; UI.open_info=true end
 function UI.about_geometry()
   local pad_x,pad_y=20,17
-  local texts={TITLE,tr('Version: ')..'0.5.9',
+  local texts={TITLE,tr('Version: ')..'0.5.11',
     tr('Notes for projects, tracks and items.'),tr('Aleksei Vorobev / Patch34'),
     'https://github.com/patch-34'}
   local content_w=UI.button_size(tr('Close'))
@@ -2087,7 +2134,7 @@ function UI.info_window()
     if UI.popup_body('information_body',tr('Close')) then
       if kind=='about' then
         ImGui.Text(ctx,TITLE)
-        ImGui.TextDisabled(ctx,tr('Version: ')..'0.5.9')
+        ImGui.TextDisabled(ctx,tr('Version: ')..'0.5.11')
         ImGui.Spacing(ctx)
         ImGui.TextWrapped(ctx,tr('Notes for projects, tracks and items.'))
         ImGui.Text(ctx,tr('Aleksei Vorobev / Patch34'))
@@ -2267,7 +2314,7 @@ local function menu_bar()
   end
   if UI.begin_menu('Help') then
     local help_caption=REPOSITORY_URL and 'Help...' or 'Repository not created yet'
-    if ImGui.MenuItem(ctx,ui_label(help_caption),nil,false,REPOSITORY_URL~=nil) then UI.open_url(REPOSITORY_URL) end
+    if ImGui.MenuItem(ctx,ui_label(help_caption),nil,false,REPOSITORY_URL~=nil) then UI.open_url(UI.help_url()) end
     if ImGui.MenuItem(ctx,ui_label('About...')) then UI.show_info('about') end
     ImGui.EndPopup(ctx)
   end
@@ -2576,7 +2623,7 @@ local function draw_marked_block(tab,column,b,index)
   -- checkbox or dropdown. The window check excludes clipped areas and popups.
   if not editing and startup_layout_frames>=STARTUP_LAYOUT_FRAMES and ImGui.IsWindowHovered(ctx) then
     local mx,my=ImGui.GetMousePos(ctx)
-    if mx>=sx and mx<sx+width and my>=sy and my<bottom and ImGui.IsMouseClicked(ctx,1) then
+    if mx>=sx and mx<sx+width and my>=sy and my<bottom and ImGui.IsMouseReleased(ctx,1) then
       ImGui.OpenPopup(ctx,'block_actions')
     end
   end
@@ -2599,7 +2646,7 @@ local function column_header(tab,column,index)
       ImGui.TableNextRow(ctx); ImGui.TableNextColumn(ctx)
     end
     ImGui.TextWrapped(ctx,column.name)
-    if ImGui.IsItemHovered(ctx) and ImGui.IsMouseDoubleClicked(ctx,0) then
+    if UI.double_click_released('rename_column_'..column.id,ImGui.IsItemHovered(ctx)) then
       request_modal({kind='rename_column',title='Rename column',target=column,value=column.name})
     end
     if table_open then ImGui.TableNextColumn(ctx) end
@@ -2687,16 +2734,16 @@ local function draw_columns(tab)
   end
 end
 local function draw_document()
+  local requested_tab=force_tab;force_tab=nil
   if ImGui.BeginTabBar(ctx,'notes_tabs',ImGui.TabBarFlags_FittingPolicyScroll) then
     for index,tab in ipairs(session.doc.tabs) do
-      local flags=force_tab==tab.id and ImGui.TabItemFlags_SetSelected or 0
+      local flags=requested_tab==tab.id and ImGui.TabItemFlags_SetSelected or 0
       local renaming=tab_rename and tab_rename.target==tab
       -- Keep the tab's ID and selection while reserving space for its inline input.
       local caption=renaming and string.rep(' ',40) or label(tab.name)
-      local tab_visible=ImGui.BeginTabItem(ctx,caption..'###tab'..tab.id,nil,flags)
-      local tab_hovered=ImGui.IsItemHovered(ctx)
-      local tab_right_clicked=tab_hovered and ImGui.IsMouseClicked(ctx,1)
-      if not renaming and tab_hovered and ImGui.IsMouseDoubleClicked(ctx,0) then
+      local tab_visible,tab_hovered=UI.release_tab_item(caption..'###tab'..tab.id,tab.id,flags)
+      local tab_right_clicked=tab_hovered and ImGui.IsMouseReleased(ctx,1)
+      if not renaming and UI.double_click_released('tab_double_'..tab.id,tab_hovered) then
         begin_tab_rename(tab)
       end
       -- Capture the tab rectangle before child widgets replace the last-item data.
@@ -2724,23 +2771,37 @@ local function draw_document()
     end
     ImGui.EndTabBar(ctx)
   end
-  force_tab=nil
   if session.pending then local fn=session.pending; session.pending=nil; fn() end
 end
 local function draw_modal()
+  -- A native modal must be explicitly closed when its owner/draft changes.
+  -- This runs in a stable root ID scope even when the document epoch changes.
+  if UI.editor_popup and UI.editor_popup.draft~=modal then
+    if ImGui.BeginPopupModal(ctx,UI.editor_popup.title,nil,ImGui.WindowFlags_NoTitleBar|ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings) then
+      ImGui.CloseCurrentPopup(ctx);ImGui.EndPopup(ctx)
+    end
+    UI.editor_popup=nil
+  end
   if open_modal then ImGui.OpenPopup(ctx,open_modal);open_modal=nil end
   if not modal then return end
   local m=modal
+  UI.editor_popup={draft=m,title=m.title}
   local dimensions=UI_METRICS.popup_sizes[m.kind] or UI_METRICS.popup_sizes.name
   local width,height=table.unpack(dimensions)
-  if m.kind=='delete' then
+  if m.kind=='new_tab' or m.kind=='rename_column' then
+    width,height=UI.name_geometry(m.title)
+  elseif m.kind=='delete' then
     if not m.width then m.width,m.height=UI.confirm_geometry('Confirm deletion',m.message) end
     width,height=m.width,m.height
   end
   UI.place_popup(width,height)
-  local visible=ImGui.BeginPopup(ctx,m.title,ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings)
+  local border=themes[theme].dim
+  ImGui.PushStyleColor(ctx,ImGui.Col_Border,border)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_PopupBorderSize,1.5)
+  local visible=ImGui.BeginPopupModal(ctx,m.title,nil,ImGui.WindowFlags_NoTitleBar|ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings)
+  ImGui.PopStyleVar(ctx);ImGui.PopStyleColor(ctx)
   if visible then
-    if escape_pressed then
+    if UI.modal_cancelled(m) then
       ImGui.CloseCurrentPopup(ctx);modal=nil;ImGui.EndPopup(ctx);return
     end
     ImGui.Text(ctx,tr(m.kind=='delete' and 'Confirm deletion' or m.title));ImGui.Separator(ctx)
@@ -2956,7 +3017,7 @@ local function header_context()
   local mx,my=ImGui.GetMousePos(ctx)
   local dock=ImGui.GetWindowDockID(ctx)
   if dock<0 and dock~=last_docker then last_docker=dock; pref('last_docker',dock) end
-  if ImGui.IsWindowHovered(ctx) and ImGui.IsMouseClicked(ctx,1)
+  if ImGui.IsWindowHovered(ctx) and ImGui.IsMouseReleased(ctx,1)
       and mx>=x and mx<=x+w and my>=y and my<bottom then ImGui.OpenPopup(ctx,'header_context') end
   if begin_action_popup('header_context') then
     if ImGui.MenuItem(ctx,ui_label('Dock to docker'),nil,dock~=0) then dock_request=dock~=0 and 0 or last_docker end
@@ -3009,6 +3070,7 @@ local function frame()
     -- Invalidate active text widgets after external reload/project switch.
     ImGui.PushID(ctx,epoch)
     escape_pressed=ImGui.IsKeyPressed(ctx,ImGui.Key_Escape,false)
+    if not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0) then UI.double_press=nil;UI.tab_press=nil end
     if warming then ImGui.BeginDisabled(ctx,true) else history_shortcuts() end
     menu_bar()
     local switching=scope_selector()
@@ -3021,10 +3083,10 @@ local function frame()
       if session.target.kind~='project' then ImGui.TextWrapped(ctx,UI.owner_title(session.target)) end
       draw_document()
     end
-    if session and not switching then draw_modal() end
     UI.info_window()
     if warming then ImGui.EndDisabled(ctx) end
     ImGui.PopID(ctx)
+    draw_modal()
     ImGui.End(ctx)
   end
   ImGui.PopFont(ctx); ImGui.PopStyleVar(ctx,7); ImGui.PopStyleColor(ctx,nc)
