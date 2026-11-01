@@ -2,7 +2,7 @@
 
 **English** · [Русский](README_RU.md)
 
-**Version 0.5.4** · [Downloads](https://github.com/patch-34/reanotepad/releases) · [Changelog](CHANGELOG.md)
+**Version 0.5.9** · [Downloads](https://github.com/patch-34/reanotepad/releases) · [Changelog](CHANGELOG.md)
 
 ReaNotepad is a structured notes editor for REAPER projects, tracks and items. Documents contain tabs, resizable columns, text blocks, checkbox notes and dropdown fields. Notes are stored in the REAPER project.
 
@@ -20,9 +20,9 @@ ReaImGui is available through [ReaPack](https://reapack.com/).
 ## Installation
 
 1. Install ReaImGui through ReaPack.
-2. Download the release archive and extract `ReaNotepad_v0.5.4.lua` to the REAPER `Scripts` directory. The resource directory is available under **Options → Show REAPER resource path in explorer/finder**.
+2. Download the release archive and extract `ReaNotepad_v0.5.9.lua` to the REAPER `Scripts` directory. The resource directory is available under **Options → Show REAPER resource path in explorer/finder**.
 3. Open **Actions → Show action list** and select the **Main** section.
-4. Select **New action → Load ReaScript**, then open `ReaNotepad_v0.5.4.lua`.
+4. Select **New action → Load ReaScript**, then open `ReaNotepad_v0.5.9.lua`.
 5. Select the registered action and click **Run**.
 
 ## Documents and storage
@@ -66,11 +66,11 @@ The icons in each column heading create or import blocks in that column. Hoverin
 | Dropdown | Named field with editable options |
 | Import text | Text import dialog |
 
-The top-level **Add** menu provides the same block types. A block's **…** menu contains movement, color and deletion commands.
+The top-level **Add** menu provides the same block types. Block properties contain movement, color and deletion commands. Open properties with **…** in Edit mode or by right-clicking the block in Read mode.
 
 ### Editing
 
-Enable **Edit** in the top toolbar to edit text and display column controls. With Edit disabled, text is displayed with word wrapping. Completion checkboxes and dropdown values remain interactive in both modes. Text-editing fields use horizontal scrolling.
+Select **Edit** (pencil) in the top toolbar to edit text and display column controls. The button is highlighted while editing and displays **Done** (check mark). Select **Done** to return to Read mode, where text uses word wrapping. Both button states have the same width. Changes are written as they are edited; Done exits Edit mode. Completion checkboxes and dropdown values remain interactive in both modes. Text-editing fields use horizontal scrolling. Completed checkbox notes are displayed with reduced opacity; their contents and controls remain accessible.
 
 For dropdown configuration, select **Edit…** beside the field name or **… → Edit field…**. The dialog supports renaming the field, editing and reordering options, and setting the selected value.
 
@@ -78,7 +78,7 @@ For dropdown configuration, select **Edit…** beside the field name or **… �
 
 ## Multiple selection
 
-1. Enable **Edit**.
+1. Select **Edit**.
 2. Open the column's **… → Select elements…** menu command.
 3. Click blocks to select or deselect them. Selected blocks display an outline and a corner check mark.
 4. Use the selection toolbar to apply an operation.
@@ -92,15 +92,17 @@ For dropdown configuration, select **Edit…** beside the field name or **… �
 
 Block contents are read-only during selection. Each bulk deletion or color assignment is a single Undo/Redo operation. In narrow columns, toolbar controls wrap or use icons with tooltips.
 
-Enabling **Hide completed** removes newly hidden blocks from the selection. Selection is cleared by changing the owner or tab, loading external note changes, using Undo/Redo, or leaving Edit mode. Esc exits selection mode; when a deletion confirmation is open, it cancels that dialog first.
+Enabling **View → Hide completed** removes newly hidden blocks from the selection. Selection is cleared by changing the owner or tab, loading external note changes, using Undo/Redo, or leaving Edit mode. Esc exits selection mode; when a deletion confirmation is open, it cancels that dialog first.
 
 ## Color markers
 
-For an individual block, use **… → Color marker**. For multiple blocks, use **Color…** in the selection toolbar.
+For an individual block, select **Color marker** in its properties menu: **…** in Edit mode or a right-click on the block in Read mode. For multiple blocks, use **Color…** in the selection toolbar.
 
 Available markers: red, orange, yellow, green, blue and purple. **No marker** removes the marker. Colors are not assigned fixed priority values.
 
-A marker is displayed as a narrow strip at the left edge of the block. The text and background retain their standard colors. Marker changes are saved with the document and support Undo/Redo.
+By default, a marker appears as a narrow strip at the left edge of the block. **View → Color marker style** provides **Left strip** and **Whole note**. Whole note applies a soft background tint to the block and its editing fields while retaining the normal text color. Completed notes remain dimmed with either style.
+
+The style applies to all marked blocks and is retained between runs. Changing the style does not modify document content or create an Undo entry. Marker colors are stored with the document and support Undo/Redo.
 
 ## Text import
 
@@ -125,11 +127,17 @@ Parsing rules:
 
 | Setting | Function |
 | --- | --- |
-| Hide completed | Hide completed checkbox notes without deleting them |
-| Font | Set note text size from 12 to 32 px |
+| View → Hide completed | Hide completed checkbox notes without deleting them |
+| View → Completed notes last | Display completed checkbox notes after all other blocks in each column |
+| View → Color marker style | Left strip or a soft whole-note background tint |
+| Font, at the right of the top toolbar | Set note text size from 12 to 32 px |
 | View → theme | Select Pages, REAPER Grey, Google Docs White or Dark |
 | View → Language | Select English or Russian |
 | Toolbar context menu → Dock to docker | Dock or undock the window |
+
+**Completed notes last** is retained between runs. Relative order within each group is preserved. Clearing a checkbox returns the note to its position among incomplete blocks. The setting affects display order only; saved block order is unchanged. Disabling it restores the original order.
+
+The font controls are aligned to the right edge of the top toolbar. In narrow windows, the complete group moves to the next row and remains right-aligned. The **Edit / Done** button matches the height of the note-owner selector.
 
 Interface font size is independent of note text size. Language changes apply to interface controls; document text and user-defined names are preserved.
 
@@ -163,7 +171,7 @@ To restore notes, select **Edit → Open recovery copy…**, open a `.notes` fil
 ## Format compatibility
 
 - Storage format: v2. Version v1 documents are converted on edit.
-- Color markers use optional `@color` directives. Versions through 0.5.3 open documents containing these directives read-only. Remove all markers in 0.5.4 before editing the document with an earlier version.
+- Color markers use optional `@color` directives. Versions through 0.5.3 open documents containing these directives read-only. Remove all markers in 0.5.9 before editing the document with an earlier version.
 - Legacy checkbox blocks remain supported.
 - Internal Patch34 storage keys are retained for compatibility with existing notes and settings.
 
