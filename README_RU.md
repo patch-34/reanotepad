@@ -20,10 +20,14 @@ ReaImGui устанавливается через [ReaPack](https://reapack.com
 ## Установка
 
 1. Установите ReaImGui через ReaPack.
-2. Скачайте архив релиза и распакуйте `ReaNotepad_v0.5.9.lua` в папку `Scripts` каталога ресурсов REAPER. Каталог открывается командой **Options → Show REAPER resource path in explorer/finder**.
+2. Скачайте архив релиза и распакуйте `ReaNotepad.lua` в папку `Scripts` каталога ресурсов REAPER. Каталог открывается командой **Options → Show REAPER resource path in explorer/finder**.
 3. Откройте **Actions → Show action list** и выберите раздел **Main**.
-4. Выберите **New action → Load ReaScript** и укажите файл `ReaNotepad_v0.5.9.lua`.
+4. Выберите **New action → Load ReaScript** и укажите файл `ReaNotepad.lua`.
 5. Выберите добавленное действие и нажмите **Run**.
+
+## Обновление
+
+Замените `ReaNotepad.lua` по тому же пути, который использовался при установке. Повторная регистрация действия не требуется; назначенные горячие клавиши и кнопки панелей сохраняются. Имя Lua-файла одинаково для всех релизов; версия указана в окне «О программе», метаданных скрипта и имени релизного архива.
 
 ## Документы и хранение
 
