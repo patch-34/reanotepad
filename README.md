@@ -2,7 +2,7 @@
 
 **English** · [Русский](README_RU.md)
 
-**Version 0.5.9** · [Downloads](https://github.com/patch-34/reanotepad/releases) · [Changelog](CHANGELOG.md)
+**Version 0.5.9**
 
 ReaNotepad is a structured notes editor for REAPER projects, tracks and items. Documents contain tabs, resizable columns, text blocks, checkbox notes and dropdown fields. Notes are stored in the REAPER project.
 
