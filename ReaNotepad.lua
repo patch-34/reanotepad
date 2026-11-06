@@ -1,12 +1,12 @@
 -- @description ReaNotepad
--- @version 0.6.0
+-- @version 0.6.1
 -- @author Aleksei Vorobev / Patch34
 -- @link
 --   GitHub repository https://github.com/patch-34/reanotepad
 -- @changelog
---   Horizontal tabs, collapsible groups and mouse reordering.
---   Group colors and creation drag-and-drop; import handles HH:MM:SS:FF.
---   Updated note editing and recovery safeguards.
+--   Restore timecode badges and navigation for previously imported notes.
+--   Timecode detection is independent of import splitting.
+--   Clarify import toggle as Split at timecodes.
 -- @about
 --   Structured notes for REAPER projects, tracks and media items.
 --   Horizontal tabs contain independently collapsible vertical groups.
@@ -33,7 +33,7 @@
 --                        https://cfillion.ca/reaper_imgui_doc.html
 
 local M = {}
-local VERSION = '0.6.0'
+local VERSION = '0.6.1'
 -- ============================================================================
 -- UI SETTINGS / НАСТРОЙКИ ИНТЕРФЕЙСА                        EDIT HERE
 -- ============================================================================
@@ -562,8 +562,9 @@ function M.timecode_prefix(text,frame_rate,drop_frame)
   return negative and -seconds or seconds,(negative and '-' or '')..token
 end
 function M.block_time(block,frame_rate,drop_frame)
-  -- nil: legacy/manual notes auto-detect; false: import explicitly opted out.
-  if block.timecode==false then return nil end
+  -- Detect leading timecodes regardless of historical @timecode flags.
+  -- v0.6.0 stored @timecode 0 for imports with splitting disabled;
+  -- preserving the flag in storage but ignoring it restores these notes.
   if block.kind=='text' or block.kind=='note' then return M.timecode_prefix(block.text or '',frame_rate,drop_frame) end
   if block.kind=='check' or block.kind=='select' then return M.timecode_prefix(block.label or '',frame_rate,drop_frame) end
 end
@@ -1638,7 +1639,7 @@ local RU = {
   ["Import"]="Импорт",
   ["+ Option"]="+ Вариант",
   ["Remove numbering"]="Удалять нумерацию",
-  ["Recognize timecodes"]="Распознавать таймкоды",
+  ["Split at timecodes"]="Разделять по таймкодам",
   ["No notes yet"]="Заметок пока нет",
   ["Drag to move note"]="Перетащи, чтобы переместить заметку",
   ["Expand column"]="Развернуть колонку",
@@ -5092,7 +5093,7 @@ local function draw_modal()
           end
           local rv,value=UI.checkbox(ui_label('Remove numbering'),m.strip)
           if rv then m.strip=value;refresh_import_preview(m) end
-          rv,value=UI.checkbox(ui_label('Recognize timecodes'),m.timecodes)
+          rv,value=UI.checkbox(ui_label('Split at timecodes'),m.timecodes)
           if rv then m.timecodes=value;refresh_import_preview(m) end
           -- One extra item gap separates the header from the panel labels.
           ImGui.Dummy(ctx,0,0)
@@ -5194,7 +5195,9 @@ local function draw_modal()
         local fps,drop_frame=project_timecode_settings()
         for _,text in ipairs(m.preview) do
           local block=M.note(text)
-          if M.timecode_prefix(text,fps,drop_frame)~=nil then block.timecode=m.timecodes end
+          -- Save positive metadata for compatibility; never suppress badges
+          -- just because import-time splitting was disabled.
+          if m.timecodes and M.timecode_prefix(text,fps,drop_frame)~=nil then block.timecode=true end
           m.column.blocks[#m.column.blocks+1]=block
         end
       elseif m.kind=='delete' then m.action();edit_action=m.history_action
