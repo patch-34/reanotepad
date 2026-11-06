@@ -26,7 +26,7 @@ ReaNotepad is also maintained in the [Patch34 Scripts ReaPack repository](https:
 
 ## Updating
 
-Replace the existing `ReaNotepad.lua` in the same location. Keep that filename unchanged to retain REAPER action IDs, shortcuts and toolbar assignments. You do not need to register the action again. Save a backup of important REAPER projects before opening them with a new major document format.
+Replace the existing `ReaNotepad.lua` in the same location. Keep that filename unchanged to retain REAPER action IDs, shortcuts and toolbar assignments. You do not need to register the action again. Save a backup of important REAPER projects before editing them in a new major document format.
 
 ## Documents and storage
 
@@ -38,7 +38,7 @@ Use the owner selector at the top to switch between three scopes:
 | Track | One selected track, including the master track | Track extension data in the `.rpp` project |
 | Item | One selected media item | Native item notes |
 
-In Track and Item modes, the editor follows the selection in REAPER and requires exactly one owner. Every owner has its own tabs, groups and session Undo/Redo history. Changes are written into the open project; **save the REAPER project** to make them persistent on disk.
+In Track and Item modes, the editor follows the selection in REAPER and requires exactly one selected track or item. Every owner has its own tabs, groups and session Undo/Redo history. Changes are written into the open project; **save the REAPER project** to make them persistent on disk.
 
 Existing plain-text notes are imported into the document without changing their native contents until the first edit.
 
@@ -66,7 +66,7 @@ Drag a note by the grip at its left edge to reorder it or move it into another g
 
 Click a text note to edit it in place. **Enter** applies the edit, **Shift+Enter** inserts a line break, and clicking outside applies the edit. **Esc** asks for confirmation before discarding changed text. Read-mode text wraps visually without changing the saved line breaks.
 
-Click a checkbox to mark a note complete. Select a dropdown value directly from its menu. Use **Edit…** next to a dropdown's name or **… → Edit field…** to change its name, options, order and current value. An individual note edit is one Undo step.
+Click a checkbox to mark a note complete. Select a dropdown value directly from its menu. Click a dropdown's name to reveal **Edit…** beside it, or use **… → Edit field…**, to change its name, options, order and current value. An individual note edit is one Undo step.
 
 ## Multiple selection
 
@@ -112,7 +112,7 @@ The four-part format uses the current REAPER project's frame rate and supports i
 | **View → Note spacing** | Adjust the gap above and below note separators from 0 to 24 px; default **5 px**; **Reset spacing** restores the default |
 | **View → Pages / REAPER Grey / Google Docs White / Dark** | Select the interface theme |
 | **View → Language** | English or Russian interface |
-| **Font** slider | Note text size, 12–32 px, independently of the interface font |
+| **Font** slider | Note text size, 12–32 px, independently of the interface font; double-click the slider to reset it to 16 px |
 | **Dock to docker** | Dock/undock through the window's context menu |
 
 View preferences are saved between runs and do not create document Undo entries. The **Help** menu opens this README or the Russian README according to the selected interface language.
