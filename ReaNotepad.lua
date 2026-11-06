@@ -1,78 +1,398 @@
 -- @description ReaNotepad
--- @version 0.5.11
+-- @version 0.6.0
 -- @author Aleksei Vorobev / Patch34
+-- @link
+--   GitHub repository https://github.com/patch-34/reanotepad
+-- @changelog
+--   Horizontal tabs, collapsible groups and mouse reordering.
+--   Group colors and creation drag-and-drop; import handles HH:MM:SS:FF.
+--   Updated note editing and recovery safeguards.
 -- @about
---   Structured notes for REAPER projects, tracks and items.
---   Tabs, columns, text, completion checkboxes and editable dropdown fields.
---   Import appends to a chosen column as one undoable edit; preview before adding.
---   @note 0/1 ... @end extends v2 with multiline checkbox notes.
---   Older script versions reject these new blocks without overwriting them.
---   Dropdowns stay at 420px when space allows and shrink to fit narrow columns.
---   Visible blinking text caret; double-click a tab to rename it in place.
---   Enter / click outside applies a tab name; Esc cancels. Column names use a dialog.
---   Requires REAPER 7 and ReaImGui 0.10+ (install through ReaPack).
+--   Structured notes for REAPER projects, tracks and media items.
+--   Horizontal tabs contain independently collapsible vertical groups.
+--   Text notes, checkbox notes, editable dropdowns and text import.
+--   Mouse reordering of tabs and notes; note drag/drop between groups.
+--   Per-note colors, colored group headings, HH:MM:SS:FF timecode navigation.
+--   Owner-scoped Undo/Redo, native-note conflict checks and recovery copies.
+--   Requires REAPER 7+ and ReaImGui 0.10+; SWS is not required.
 --   Install: Actions > Show action list > New action > Load ReaScript.
 --
---   Design palette adapted from Podcast HTML/DOCX Script Viewer v3.1.0-beta.1.
---   The original viewer is not modified and is not required at runtime.
---
 --   STORAGE: Project notes use native GetSetProjectNotes. Item notes use P_NOTES.
---   Track notes use P_EXT:PATCH34_PROJECT_NOTES, stored with the track in the RPP.
---   No SWS dependency. Normal notes have no sidecar files.
---   On errors only, recovery copies go to REAPER/Data/Patch34_Project_Notes_Recovery.
---   Edit > Open recovery copy previews a .notes file before explicit restoration.
---   Recovery copies can contain an incomplete operation; inspect before restoring.
---   Track notes do not use SWS Track Notes.
---   Appearance preferences and the chosen scope use global ExtState.
---   Choose Project / Track / Item at the top. Track and Item modes require exactly
---   one selected object (master track supported). Existing item notes are imported
---   without writing until the first edit. Switching owner cancels unapplied drafts.
---   Each object has its own tabs, columns and session Undo/Redo history.
---   Owner pointers and GUIDs are checked before writes; deletion never redirects
---   notes to another object. Save the project to keep all object notes on disk.
---   Changes update the open project immediately; save the RPP to persist to disk.
---   Existing plain notes are imported into the first tab without writing anything
---   until the first edit. Native notes remain readable as a small text format.
---   v1 notes migrate to the first column; opening alone does not rewrite them.
---   v2 stores columns with @column/@endcolumn inside @tab/@endtab.
---   Do not remove structural markers when editing natively.
---   Malformed/unsupported structured notes open read-only, never auto-repaired.
---   A native edit is reloaded automatically; a write conflict is never overwritten.
+--   Track notes use P_EXT:PATCH34_PROJECT_NOTES, stored in the .rpp project.
+--   Documents use Patch34 Project Notes v3; legacy v1/v2 and plain notes remain
+--   readable. Opening older notes alone does not rewrite them.
+--   Old scripts may not support documents saved by this version.
+--   Changes update REAPER immediately; save the project to persist to disk.
+--   Recovery copies are stored under Data/Patch34_Project_Notes_Recovery.
+--   Review recovery files before manually restoring them.
+--   Historical storage keys, format headers and window IDs remain unchanged.
 --
---   USE: Tab menu adds/renames/reorders/deletes tabs. Add > Column adds a column.
---   Each column has quick actions for text, checkbox notes, dropdowns and import.
---   Hover an icon for its localized description; column properties use the ... menu.
---   Column properties enable multiple selection; block properties set color markers.
---   Bulk deletion/color changes are undoable. Marker metadata uses @color in v2.
---   Older scripts open colored documents read-only; remove markers before downgrading.
---   Block actions can move widgets between columns. Up to 8 columns per tab.
---   Drag a vertical column boundary to redistribute the available width.
---   Columns fit the window; their relative widths are retained during this session.
---   Undo/Redo: Edit menu, Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (also Ctrl/Cmd+Y).
---   History includes all content/structure edits and groups continuous typing.
---   Each note owner has a separate session history, capped at 100 entries / 16 MiB
---   per stack (at least one snapshot retained). History resets after native edits
---   or a script restart. Appearance preferences are not part of document history.
---   Popup drafts use native input Undo until Apply commits one document edit.
---   Esc or a click outside a popup discards its unapplied draft.
---   Edit mode exposes text and checkbox labels. Read mode wraps text to page width.
---   Dropdown values remain clickable in either mode; Edit... changes field names,
---   option names/order and adds/removes options. Block properties use ... in Edit
---   mode and a right-click on the block in Read mode. Completed notes are dimmed.
---   View > Completed notes last groups completed blocks at the end of each column
---   without changing saved block order. This preference persists between runs.
---   View > Color marker style selects a left strip or a soft whole-block fill.
---   The native multiline editor has horizontal scrolling, not soft word wrapping.
---   This is a plain-text block editor, not the source viewer's HTML/DOCX renderer.
---
---   VALIDATION: syntax, serializer/parser, storage guards and simulated UI paths
---   tested outside REAPER. Native window rendering and REAPER undo need a host test.
---   API references: https://www.reaper.fm/sdk/reascript/reascripthelp.html
---                   https://cfillion.ca/reaper_imgui_doc.html
---                   https://github.com/cfillion/reaimgui/blob/master/examples/demo.lua
+--   UI is adapted from Podcast HTML/DOCX Script Viewer v3.1.0-beta.1.
+--   The source viewer is not modified or needed at runtime.
+--   Official references: https://www.reaper.fm/sdk/reascript/reascripthelp.html
+--                        https://cfillion.ca/reaper_imgui_doc.html
 
 local M = {}
-local HEADER = '# Patch34 Project Notes v2'
+local VERSION = '0.6.0'
+-- ============================================================================
+-- UI SETTINGS / НАСТРОЙКИ ИНТЕРФЕЙСА                        EDIT HERE
+-- ============================================================================
+-- This is the single editable block for visual layout, fonts and theme colors.
+-- Numbers below are pixels unless noted; alpha values are ratios (0..1). The settings do NOT change note data.
+-- Start with one change at a time; test narrow windows and REAPER Docker.
+-- font_size is read from the active ImGui font every frame (do not edit it).
+-- Размеры — в пикселях; прозрачность — 0..1. font_size обновляется из ImGui.
+-- Note indentation reserves a safe gutter for the marker and drag handle.
+-- Отступ заметки учитывает ширину маркера и области перетаскивания.
+-- Native ImGui style values not overridden here inherit the REAPER/ImGui style.
+-- Непереопределённые параметры нативного ImGui наследуются от REAPER/ImGui.
+local UI_METRICS = {
+  -- Typography / Типографика: main UI font is independent of note text size slider.
+  font_family='sans-serif', font_size=13, -- font_size is runtime-only
+  column_heading_bold=true, tab_heading_extra_px=0, tab_arrow_extra_px=5,
+  note_text_min_size=12, note_text_max_size=32, note_text_default_size=16,
+
+  -- Main window / Основное окно.
+  window_initial_width=545, window_initial_height=615,
+  window_min_width=540, window_min_height=360,
+  menu_bar_height=38, menu_bar_pad_x=4,
+  menu_trigger_pad_x=8, menu_label_min_inset_x=6, menu_label_min_inset_y=1,
+  history_shortcut_gap=12, history_shortcut_min_spaces=2,
+  window_pad_x=12, window_pad_y=10,
+  frame_pad_x=6, frame_pad_y=3,
+  frame_rounding=3, child_rounding=0, frame_border_size=1,
+
+  -- Buttons and Controls / Кнопки и элементы управления: spacing / интервалы.
+  item_gap_x=8, item_gap_y=8,
+  group_gap=16, inner_gap=8, checkbox_label_gap=6,
+  checkbox_pad_y=1, read_line_gap=2,
+  note_checkbox_offset_y=0, -- Optical correction relative to the shared first-line center.
+  note_checkbox_text_gap=6, -- Space after the native checkbox; independent of item spacing.
+
+  -- Buttons and Controls / Кнопки и элементы управления.
+  button_pad_x=8, button_pad_y=3, button_min_height=23,
+  compact_button_pad_x=10, button_rounding=3,
+  scope_min_width=110, column_name_min_width=60,
+  dropdown_width=420, dropdown_visible_rows=8, dropdown_popup_extra_height=16,
+  button_border_size=1,
+  quick_icon_size=16, quick_icon_total_inset=7,
+  timecode_icon_size=14, timecode_label_gap=4,
+
+  -- Shared right alignment / Общая правая граница кнопок внутри колонки.
+  -- action_to_scroll_gap: distance between action-button edge and scrollbar thumb.
+  -- action_right_inset: move ALL column/tab/note action buttons farther left.
+  -- Both values are measured in pixels. Do not change each component separately.
+  -- action_to_scroll_gap: расстояние от кнопок до ползунка скролла.
+  -- action_right_inset: дополнительный сдвиг ВСЕХ правых кнопок влево.
+  action_to_scroll_gap=12, action_right_inset=4,
+  -- Shared absolute screen anchor: the right edge of the last creation button.
+  -- Tabs and group menus align to this anchor, without separate pixel guesses.
+  -- Общий экранный якорь: правый край последней кнопки верхней панели.
+  -- Верхняя панель определяет линию для кнопок вкладок и меню групп.
+  creation_toolbar_right_inset=12,
+
+  -- Horizontal tabs / Горизонтальные вкладки.
+  tabs_strip_height=38, tabs_strip_pad_x=8, tabs_strip_pad_y=4,
+  tabs_strip_label_pad_x=14, tabs_strip_gap=4, tabs_strip_min_width=56,
+  tabs_strip_button_gap=8, tabs_strip_active_line=2,
+  tabs_drag_threshold=6, tabs_drop_line_width=2,
+  tabs_drag_scroll_edge=24, tabs_drag_scroll_speed=360, -- pixels/second
+  -- Minimum safe inset when the shared anchor is unavailable or too far right.
+  -- Минимальный защитный отступ; не самостоятельный сдвиг относительно панели.
+  tabs_actions_right_inset=8,
+  group_header_tint_light=0.25, group_header_tint_dark=0.34,
+  -- Extra air between horizontal tab strip and the first group heading.
+  -- Воздух сверху: первая группа не прижимается к панели вкладок.
+  group_panel_top_padding=12,
+  -- This inset moves the group heading AND its menu together.
+  -- Сдвигает весь заголовок вместе с кнопкой «…», без разрыва фона.
+  group_header_min_height=26, group_header_right_inset=0,
+  -- Plain three-dot group menu / Три тонкие точки без рамки кнопки.
+  -- right_inset moves ONLY the painted dots, keeping the click target aligned.
+  -- right_inset сдвигает только рисунок точек, не область нажатия.
+  group_menu_dot_radius=1.0, group_menu_dot_spacing=4.6,
+  group_menu_dots_right_inset=13,
+  -- Legacy column heading metrics are retained as inert compatibility settings.
+  -- Columns / Колонки: heading / заголовок колонки (fixed above the scrolling body).
+  column_heading_pad_x=1, column_heading_pad_y=4,
+  column_heading_height_extra=8, column_heading_indent=5,
+  column_heading_add_min_space=40,
+
+  -- Tabs / Вкладки: heading / заголовок внутри колонки.
+  tab_heading_menu_gap=4, tab_heading_min_title=18,
+  tab_heading_arrow_text_gap=2, tab_heading_hover_alpha=0.85,
+  tab_rename_min_width=12, tab_rename_pad_x=3, tab_rename_pad_y=1,
+  tab_rename_inset_x=4, tab_rename_inset_y=2,
+
+  -- Font slider / Ползунок размера текста заметок.
+  slider_width=140, slider_min_width=64, slider_row_height=22,
+  slider_knob_radius=6, slider_outline=1.5,
+  slider_track_height=3, slider_circle_segments=24,
+  slider_outline_normal=1.2,
+
+  -- Scrollbars / Скроллбары: overlay thumb / ползунок поверх содержимого.
+  overlay_scroll_width=5, overlay_scroll_inset=3, overlay_scroll_margin=6,
+  overlay_scroll_min_thumb_height=24, overlay_scroll_min_track_height=24,
+  overlay_scroll_hit_pad_left=2, overlay_scroll_hit_pad_right=1,
+
+  -- Notes / Заметки.
+  note_padding_y=4, -- Shared internal top/bottom padding, colored or uncolored.
+  note_content_gap_y=4, -- Heading-to-second-row spacing; independent of outer padding.
+  note_indent=24, note_row_inset_x=12, note_gutter_end_gap=4, note_actions_min_content_width=48,
+  -- Separators are drawn only up to the shared actions edge; inset trims them.
+  -- Сепараторы заканчиваются у границы кнопок; inset укорачивает линию.
+  note_separator_right_inset=0, note_separator_thickness=1,
+  note_separator_height=1, note_separator_raise=5,
+  note_spacing_default=5, note_spacing_min=0, note_spacing_max=24, -- each side of a note separator (px)
+  note_edit_min_height=66, note_edit_max_height=240,
+  note_edit_extra_lines=3, note_edit_extra_height=12,
+  completed_note_alpha=0.55,
+  marker_fill_rounding=3, marker_fill_min_height=1,
+  marker_strip_offset_x=1, marker_strip_width=3, marker_strip_pad_y=2,
+  marker_strip_min_bottom_offset=10, marker_strip_rounding=1,
+  marker_menu_offset_x=3, marker_menu_side=8, marker_menu_rounding=1,
+  marker_menu_label_spaces=3, marker_menu_text_gap=6,
+  selection_text_gutter=22, selection_min_height=23, selection_bottom_pad=4,
+  selection_rounding=2, selection_border_size=1,
+  selection_check_right_offset=18, selection_check_offset_y=2,
+  editor_extra_pad_x=2, editor_extra_pad_y=2, editor_wrap_right_inset=2,
+  editor_newline_selection_min_width=4, editor_caret_thickness=1, editor_tab_spaces=4,
+  editor_caret_period=1.2, editor_caret_visible_time=0.6, -- seconds / секунды
+
+  -- Drag Handles and Drop Targets / Перетаскивание и области приёма.
+  drag_handle_offset_x=6,
+  drag_handle_width=14, drag_handle_max_height=18, drag_handle_icon_size=14,
+  drag_handle_dot_radius=1, drag_handle_dot_pitch=4, -- Vector grip shape, not position offsets.
+  drag_preview_max_chars=48,
+  -- Shared outline for a dragged note and new-object placement targets.
+  -- Общий стиль рамки перетаскиваемой заметки и области добавления объекта.
+  drag_note_highlight_padding_x=4, drag_note_highlight_padding_y=4, drag_note_highlight_rounding=3,
+  drag_note_highlight_border_thickness=1.0,
+  drag_note_highlight_dash=5, drag_note_highlight_gap=4,
+  trash_target_width=23, trash_icon_only=true, -- compact icon in the top toolbar
+  trash_icon_size=16, trash_icon_vertical_inset=6, trash_icon_offset_x=8,
+  trash_label_offset_x=30, trash_icon_label_gap=6,
+  trash_border_size=1, trash_hover_border_size=2,
+  drop_line_thickness=2, empty_tab_placement_height=38,
+
+  -- Dialogs and Popups / Диалоги и всплывающие окна.
+  confirm_min_width=280, confirm_max_width=520,
+  popup_margin=12, popup_footer_gap=8, popup_border_size=1.5,
+  import_pane_min_height=56, options_panel_min_height=60,
+  option_input_min_width=60, option_actions_reserved_width=110,
+  about_pad_x=20, about_pad_y=17, about_rounding=12,
+  about_button_rounding=7, about_geometry_extra=2,
+  -- Preferred outer sizes / Предпочтительные внешние размеры.
+  -- Name height and About use content-measured minima; 0 means automatic.
+  -- Высота Name и размеры About: минимум по содержимому; 0 — автоматически.
+  popup_sizes={restore={580,460},name={320,0},select={500,460},import={860,440},about={0,0},note_cancel={390,146}},
+}
+
+-- Theme colors / Цвета оформления. RGBA component values are 0..255.
+-- Leave historical storage keys and format headers elsewhere unchanged.
+local function rgba(r,g,b,a) return (r<<24)|(g<<16)|(b<<8)|(a or 255) end
+-- Theme color roles / Роли цветов тем. Native tabs/checks
+-- use the agreed role mapping below; unused search/document roles are omitted.
+local VIEWER_THEMES = {
+  paper = {
+    label = "Pages",
+
+    C_PAPER = rgba(217, 215, 209),
+    C_TEXT = rgba(28, 28, 28),
+    C_DIM = rgba(153, 153, 153),
+
+    C_CHROME = rgba(236, 234, 229),
+    C_CHROME_DEEP = rgba(208, 206, 201),
+    C_CHROME_TITLE = rgba(236, 234, 229),
+
+    C_HEAD = rgba(225, 223, 218),
+    C_HEAD_H = rgba(208, 206, 201),
+    C_FRAME = rgba(245, 244, 240),
+
+    C_LINE = rgba(208, 206, 201),
+    C_MENU_BORDER = rgba(208, 206, 201),
+    C_SCROLL = rgba(158, 155, 149),
+    C_SCROLL_H = rgba(174, 172, 166),
+    C_SCROLL_A = rgba(140, 137, 131),
+    C_SCROLL_BG = rgba(217, 215, 209),
+
+    C_VIEW_SLIDER_TRACK = rgba(200, 198, 192),
+    C_VIEW_SLIDER_FILL = rgba(74, 124, 199),
+    C_VIEW_SLIDER_KNOB_FILL = rgba(245, 244, 240),
+    C_VIEW_SLIDER_KNOB_OUTLINE = rgba(74, 124, 199),
+
+    C_VIEW_BUTTON_FILL = rgba(245, 244, 240),
+    C_VIEW_BUTTON_HOVER = rgba(236, 234, 229),
+    C_VIEW_BUTTON_ACTIVE = rgba(225, 223, 218),
+    C_VIEW_BUTTON_BORDER = rgba(208, 206, 201),
+
+  },
+
+  grey = {
+    label = "REAPER Grey",
+
+    C_PAPER = rgba(239, 239, 239),
+    C_TEXT = rgba(28, 24, 18),
+    C_DIM = rgba(112, 112, 112),
+
+    C_CHROME = rgba(218, 218, 218),
+    C_CHROME_DEEP = rgba(92, 112, 104),
+    C_CHROME_TITLE = rgba(112, 132, 122),
+
+    C_HEAD = rgba(202, 206, 210),
+    C_HEAD_H = rgba(188, 193, 198),
+    C_FRAME = rgba(250, 250, 250),
+
+    C_LINE = rgba(104, 120, 114),
+    C_MENU_BORDER = rgba(104, 120, 114, 60),
+    C_SCROLL = rgba(176, 176, 176),
+    C_SCROLL_H = rgba(154, 154, 154),
+    C_SCROLL_A = rgba(132, 132, 132),
+    C_SCROLL_BG = rgba(239, 239, 239),
+
+    C_VIEW_SLIDER_TRACK = rgba(196, 196, 196),
+    C_VIEW_SLIDER_FILL = rgba(86, 104, 124),
+    C_VIEW_SLIDER_KNOB_FILL = rgba(252, 252, 252),
+    C_VIEW_SLIDER_KNOB_OUTLINE = rgba(86, 104, 124),
+
+    C_VIEW_BUTTON_FILL = rgba(238, 238, 238),
+    C_VIEW_BUTTON_HOVER = rgba(226, 226, 226),
+    C_VIEW_BUTTON_ACTIVE = rgba(214, 214, 214),
+    C_VIEW_BUTTON_BORDER = rgba(174, 174, 174),
+
+  },
+
+  white = {
+    label = "Google Docs White",
+
+    C_PAPER = rgba(241, 243, 244),
+    C_TEXT = rgba(32, 33, 36),
+    C_DIM = rgba(95, 99, 104),
+
+    C_CHROME = rgba(248, 250, 253),
+    C_CHROME_DEEP = rgba(232, 240, 254),
+    C_CHROME_TITLE = rgba(248, 250, 253),
+
+    C_HEAD = rgba(232, 240, 254),
+    C_HEAD_H = rgba(210, 227, 252),
+    C_FRAME = rgba(255, 255, 255),
+
+    C_LINE = rgba(218, 220, 224),
+    C_MENU_BORDER = rgba(218, 220, 224),
+    C_SCROLL = rgba(189, 193, 198),
+    C_SCROLL_H = rgba(154, 160, 166),
+    C_SCROLL_A = rgba(128, 134, 139),
+    C_SCROLL_BG = rgba(241, 243, 244),
+
+    C_VIEW_SLIDER_TRACK = rgba(218, 220, 224),
+    C_VIEW_SLIDER_FILL = rgba(26, 115, 232),
+    C_VIEW_SLIDER_KNOB_FILL = rgba(255, 255, 255),
+    C_VIEW_SLIDER_KNOB_OUTLINE = rgba(26, 115, 232),
+
+    C_VIEW_BUTTON_FILL = rgba(255, 255, 255),
+    C_VIEW_BUTTON_HOVER = rgba(241, 243, 244),
+    C_VIEW_BUTTON_ACTIVE = rgba(232, 240, 254),
+    C_VIEW_BUTTON_BORDER = rgba(218, 220, 224),
+
+  },
+}
+-- Dark is the approved exception to the three supplied Viewer themes.
+do
+  local bg,paper,chrome=rgba(30,32,36),rgba(37,40,45),rgba(44,47,53)
+  local text,dim,line=rgba(231,233,237),rgba(160,166,177),rgba(75,81,92)
+  local hover,accent=rgba(61,68,80),rgba(116,170,238)
+  VIEWER_THEMES.dark={label='Dark',C_PAPER=bg,C_FRAME=paper,C_TEXT=text,C_DIM=dim,C_CHROME=chrome,
+    C_CHROME_DEEP=chrome,C_CHROME_TITLE=chrome,C_HEAD=hover,C_HEAD_H=line,
+    C_LINE=line,C_MENU_BORDER=line,C_SCROLL=line,C_SCROLL_H=dim,C_SCROLL_A=dim,C_SCROLL_BG=bg,
+    C_VIEW_BUTTON_FILL=chrome,C_VIEW_BUTTON_HOVER=hover,C_VIEW_BUTTON_ACTIVE=line,C_VIEW_BUTTON_BORDER=line,
+    C_VIEW_SLIDER_TRACK=line,C_VIEW_SLIDER_FILL=accent,C_VIEW_SLIDER_KNOB_FILL=paper,C_VIEW_SLIDER_KNOB_OUTLINE=accent}
+end
+
+-- Shared palettes / Общие палитры (RGBA; alpha multipliers are 0..1).
+-- About intentionally keeps the original theme-independent Viewer skin.
+local UI_PALETTE = {
+  text_selection_alpha=65,
+  modal_dim_light=rgba(0,0,0,90), modal_dim_dark=rgba(0,0,0,140),
+  about={background=rgba(80,80,80,218),border=rgba(220,220,220,95),
+    text=rgba(245,245,245),dim=rgba(210,210,210),
+    button=rgba(105,105,105,230),button_hover=rgba(122,122,122,235),
+    button_border=rgba(230,230,230,80)},
+  trash={text=rgba(146,74,74,255),text_hover=rgba(181,52,52,255),
+    fill=rgba(146,74,74,14),fill_hover=rgba(181,52,52,48)},
+  drag_note_highlight_fill_alpha=0.06, drag_note_highlight_edge_alpha=120,
+  marker_tint_light=0.12, marker_tint_dark=0.18,
+}
+-- Marker palette / Палитра цветовых маркеров.
+local MARKER_PALETTE = {
+  light={red=0xc15251ff,orange=0xb5782bff,yellow=0xa29227ff,
+    green=0x54816aff,blue=0x527fa1ff,purple=0x8c6ca1ff},
+  dark={red=0xe88a85ff,orange=0xe6b767ff,yellow=0xd6c75fff,
+    green=0x82b79aff,blue=0x8fb8d6ff,purple=0xbba0cdff},
+}
+
+-- Configuration guards / Ограничения настроек.
+-- Dimensions are nonnegative; the checkbox optical y correction may be signed.
+-- Coupled geometry also clamps to the actual available space at draw time.
+do
+  for key,value in pairs(UI_METRICS) do
+    if type(value)=='number' then
+      assert(value==value and math.abs(value)<math.huge,'Invalid UI metric: '..key)
+      if key~='note_checkbox_offset_y' then
+        UI_METRICS[key]=math.max(0,value)
+      end
+    end
+  end
+  for _,key in ipairs({'note_text_min_size','note_text_max_size','note_text_default_size',
+      'button_min_height','slider_row_height','slider_knob_radius',
+      'note_edit_min_height','note_edit_max_height','overlay_scroll_width',
+      'overlay_scroll_min_thumb_height','editor_caret_period'}) do
+    UI_METRICS[key]=math.max(1,UI_METRICS[key])
+  end
+  UI_METRICS.note_text_min_size=math.max(1,math.floor(UI_METRICS.note_text_min_size))
+  UI_METRICS.note_text_max_size=math.max(UI_METRICS.note_text_min_size,math.floor(UI_METRICS.note_text_max_size))
+  UI_METRICS.note_text_default_size=math.max(UI_METRICS.note_text_min_size,
+    math.min(UI_METRICS.note_text_max_size,math.floor(UI_METRICS.note_text_default_size)))
+  UI_METRICS.note_edit_max_height=math.max(UI_METRICS.note_edit_min_height,UI_METRICS.note_edit_max_height)
+  UI_METRICS.confirm_max_width=math.max(UI_METRICS.confirm_min_width,UI_METRICS.confirm_max_width)
+  UI_METRICS.slider_circle_segments=math.max(3,math.floor(UI_METRICS.slider_circle_segments))
+  UI_METRICS.dropdown_visible_rows=math.max(1,math.floor(UI_METRICS.dropdown_visible_rows))
+  UI_METRICS.editor_tab_spaces=math.max(1,math.floor(UI_METRICS.editor_tab_spaces))
+  UI_METRICS.marker_menu_label_spaces=math.floor(UI_METRICS.marker_menu_label_spaces)
+  UI_METRICS.history_shortcut_min_spaces=math.floor(UI_METRICS.history_shortcut_min_spaces)
+  UI_METRICS.drag_preview_max_chars=math.max(1,math.floor(UI_METRICS.drag_preview_max_chars))
+  UI_METRICS.completed_note_alpha=math.min(1,UI_METRICS.completed_note_alpha)
+  UI_METRICS.tab_heading_hover_alpha=math.min(1,UI_METRICS.tab_heading_hover_alpha)
+  UI_METRICS.group_header_tint_light=math.min(1,UI_METRICS.group_header_tint_light)
+  UI_METRICS.group_header_tint_dark=math.min(1,UI_METRICS.group_header_tint_dark)
+  UI_METRICS.tabs_strip_height=math.max(UI_METRICS.button_min_height,UI_METRICS.tabs_strip_height)
+  UI_METRICS.editor_caret_visible_time=math.min(UI_METRICS.editor_caret_period,UI_METRICS.editor_caret_visible_time)
+  UI_METRICS.slider_row_height=math.max(UI_METRICS.slider_row_height,
+    2*(UI_METRICS.slider_knob_radius+UI_METRICS.slider_outline))
+  UI_METRICS.column_heading_height_extra=math.max(UI_METRICS.column_heading_height_extra,
+    2*UI_METRICS.column_heading_pad_y)
+  for _,dimensions in pairs(UI_METRICS.popup_sizes) do
+    for i=1,2 do
+      assert(type(dimensions[i])=='number' and dimensions[i]==dimensions[i]
+        and math.abs(dimensions[i])<math.huge,'Invalid popup dimension')
+      dimensions[i]=math.max(0,dimensions[i])
+    end
+  end
+  for _,key in ipairs({'marker_tint_light','marker_tint_dark',
+      'drag_note_highlight_fill_alpha'}) do
+    UI_PALETTE[key]=math.max(0,math.min(1,UI_PALETTE[key]))
+  end
+  for _,key in ipairs({'text_selection_alpha',
+      'drag_note_highlight_edge_alpha'}) do
+    UI_PALETTE[key]=math.floor(math.max(0,math.min(255,UI_PALETTE[key])))
+  end
+end
+
+-- ============================================================================
+-- END UI SETTINGS / КОНЕЦ НАСТРОЕК ИНТЕРФЕЙСА
+-- ============================================================================
+
+local HEADER = '# Patch34 Project Notes v3'
+local PREVIOUS_HEADER = '# Patch34 Project Notes v2'
 local LEGACY_HEADER = '# Patch34 Project Notes v1'
 local sequence = 0
 local function uid() sequence = sequence + 1; return sequence end
@@ -168,7 +488,152 @@ function M.selection_color(column,selected,hide,key)
 end
 -- Explicit list markers are distinct from numbers in prose. Bare numbers
 -- require an adjacent consecutive candidate; a single "2026 year" is not a list.
-function M.import_text(raw,strip)
+-- Only a leading timecode is an anchor; numbers inside prose stay ordinary
+-- text. Keep its spelling in the note and resolve it again after text edits.
+-- Four-field timecodes use the current project's frame rate (including DF mode).
+-- The caller supplies these only when a REAPER project is available; never
+-- guess an FPS for imported data. Two/three-field codes remain seconds-based.
+function M.timecode_prefix(text,frame_rate,drop_frame)
+  local value=norm(text:sub(1,512)):gsub('^\239\187\191',''):gsub('\194\160',' ')
+  local first,rest=value:match('^([^\n]*)\n?(.*)$')
+  first=first:match('^%s*(.-)%s*$')
+  if first:match('^%d+[%.%):]$') or first:match('^%(%d+%)$') or first:match('^%[%d+%]$')
+      or first:match('^[1-9]%d?%d?$') then
+    first=rest:match('^%s*([^\n]*)') or ''
+  end
+  local body=first:match('^%(%d+%)%s+(.+)$') or first:match('^%[%d+%]%s+(.+)$')
+    or first:match('^[%d%.]+[%.%):]%s+(.+)$')
+  if not body then
+    for _,dash in ipairs({'-','–','—'}) do
+      body=first:match('^%d+%s*'..(dash=='-' and '%-' or dash)..'%s+(.+)$')
+      if body then break end
+    end
+  end
+  first=body or first:match('^%d+%s+(.+)$') or first
+  local bold=first:sub(1,2)=='**'
+  if bold then first=first:sub(3) end
+  local opener=first:sub(1,1)
+  local closer=opener=='[' and ']' or opener=='(' and ')' or nil
+  if closer then first=first:sub(2) end
+  local negative=first:sub(1,1)=='-'
+  if negative then first=first:sub(2) end
+  local token,tail=first:match('^([%d:.,]+)(.*)$')
+  if not token then return nil end
+  if closer then
+    if tail:sub(1,1)~=closer then return nil end
+    tail=tail:sub(2)
+  end
+  if bold then
+    if tail:sub(1,2)~='**' then return nil end
+    tail=tail:sub(3)
+  end
+  if tail~='' and not tail:match('^%s') then return nil end
+  local whole,fraction=token:match('^(.-)[.,](%d+)$')
+  if fraction and #fraction>3 then return nil end
+  whole=whole or token
+  local h,m,s,frames=whole:match('^(%d+):(%d%d):(%d%d):(%d%d)$')
+  local seconds
+  if frames then
+    -- Frame counts have their own precision; don't mix them with milliseconds.
+    if fraction or type(frame_rate)~='number' or frame_rate~=frame_rate
+        or frame_rate<=0 or frame_rate==math.huge then return nil end
+    local nominal=math.floor(frame_rate+0.5)
+    local hh,mm,ss,ff=tonumber(h),tonumber(m),tonumber(s),tonumber(frames)
+    if nominal<1 or mm>=60 or ss>=60 or ff>=nominal then return nil end
+    local frame_number=((hh*3600+mm*60+ss)*nominal+ff)
+    if drop_frame and (nominal==30 or nominal==60)
+        and math.abs(frame_rate-nominal*1000/1001)<0.01 then
+      -- SMPTE DF numbering skips 2 (or 4 at 59.94) frame labels at each
+      -- minute except every tenth. Reject labels that would be skipped.
+      local dropped=nominal==60 and 4 or 2
+      if mm%10~=0 and ss==0 and ff<dropped then return nil end
+      local minutes=hh*60+mm
+      frame_number=frame_number-dropped*(minutes-math.floor(minutes/10))
+    end
+    seconds=frame_number/frame_rate
+  else
+    h,m,s=whole:match('^(%d+):(%d%d):(%d%d)$')
+    if not h then m,s=whole:match('^(%d+):(%d%d)$') end
+    if not m or tonumber(s)>=60 or (h and tonumber(m)>=60) then return nil end
+    seconds=(tonumber(h) or 0)*3600+tonumber(m)*60+tonumber(s)
+    if fraction then seconds=seconds+tonumber('0.'..fraction) end
+  end
+  if seconds~=seconds or seconds>1e12 then return nil end
+  return negative and -seconds or seconds,(negative and '-' or '')..token
+end
+function M.block_time(block,frame_rate,drop_frame)
+  -- nil: legacy/manual notes auto-detect; false: import explicitly opted out.
+  if block.timecode==false then return nil end
+  if block.kind=='text' or block.kind=='note' then return M.timecode_prefix(block.text or '',frame_rate,drop_frame) end
+  if block.kind=='check' or block.kind=='select' then return M.timecode_prefix(block.label or '',frame_rate,drop_frame) end
+end
+function M.seek_position(block,offset,frame_rate,drop_frame)
+  local time=M.block_time(block,frame_rate,drop_frame)
+  if time==nil or type(offset)~='number' or offset~=offset or math.abs(offset)==math.huge then return nil end
+  local position=time-offset
+  if position~=position or math.abs(position)==math.huge then return nil end
+  return position
+end
+function M.timecode_label(time)
+  local sign=time<0 and '-' or ''
+  local ms=math.floor(math.abs(time)*1000+0.5)
+  local seconds=math.floor(ms/1000)
+  local hours=math.floor(seconds/3600)
+  local label=hours>0 and ('%02d:%02d:%02d'):format(hours,math.floor(seconds/60)%60,seconds%60)
+    or ('%02d:%02d'):format(math.floor(seconds/60),seconds%60)
+  if ms%1000>0 then label=label..('.%03d'):format(ms%1000):gsub('0+$','') end
+  return sign..label
+end
+-- Normalized stretch weights. New columns without a saved share receive the
+-- mean share of the visible columns.
+-- Keep a shared scale when only a subset is visible. Measuring a single
+-- expanded column must not increase its saved weight relative to folded ones.
+-- Presentation state is deliberately absent from the note format/history.
+-- Preserve it across safe cache suspension and match unambiguous names on Undo.
+function M.column_view_snapshot(doc)
+  local result={}
+  if not doc then return result end
+  for ti,tab in ipairs(doc.tabs) do
+    for ci,column in ipairs(tab.columns) do
+      result[#result+1]={tab=tab.name,name=column.name,ti=ti,ci=ci,
+        folded=column.folded,width=column.layout_width,board_folded=tab.folded,board_width=tab.layout_width}
+    end
+  end
+  return result
+end
+function M.restore_column_views(doc,views,exact)
+  local names,counts={},{}
+  for _,view in ipairs(views or {}) do
+    local key=view.tab..'\0'..view.name
+    names[key]=view;counts[key]=(counts[key] or 0)+1
+  end
+  local targets={}
+  for _,tab in ipairs(doc.tabs) do
+    for _,column in ipairs(tab.columns) do
+      local key=tab.name..'\0'..column.name
+      targets[key]=(targets[key] or 0)+1
+    end
+  end
+  local used={}
+  for ti,tab in ipairs(doc.tabs) do
+    for ci,column in ipairs(tab.columns) do
+      local key=tab.name..'\0'..column.name
+      local view=counts[key]==1 and targets[key]==1 and names[key] or nil
+      if exact then
+        view=nil
+        for _,candidate in ipairs(views or {}) do
+          if candidate.ti==ti and candidate.ci==ci and candidate.tab==tab.name and candidate.name==column.name then view=candidate;break end
+        end
+      end
+      if view and (exact or not used[key]) then
+        column.folded=view.folded;column.layout_width=view.width
+        tab.folded=view.board_folded;tab.layout_width=view.board_width
+      end
+      used[key]=true
+    end
+  end
+end
+function M.import_text(raw,strip,timecodes,frame_rate,drop_frame)
   local source=norm(raw):gsub('^\239\187\191',''):gsub('\194\160',' ')
   local ls=lines(source:match('^%s*(.-)%s*$'))
   local function trim(x)return x:match('^%s*(.-)%s*$')end
@@ -211,8 +676,8 @@ function M.import_text(raw,strip)
       return {number=tonumber(digits),body=body,explicit=false}
     end
   end
-  local parsed,sequence={},{}
-  local has_blank,has_numbers=false,false
+  local parsed,sequence,timed={},{},{}
+  local has_blank,has_numbers,has_timecodes=false,false,false
   for i,line in ipairs(ls) do
     local value=trim(line)
     ls[i]=value
@@ -232,11 +697,18 @@ function M.import_text(raw,strip)
     end
     if mark.accepted then has_numbers=true end
   end
-  local result,part,marker={},{},nil
+  if timecodes then
+    for i,value in ipairs(ls) do
+      local mark=parsed[i]
+      local position=M.timecode_prefix(mark and mark.accepted and mark.body or value,frame_rate,drop_frame)
+      if position~=nil then timed[i]=true;has_timecodes=true end
+    end
+  end
+  local result,part,marker,pending_list={},{},nil,false
   local function flush()
     local value=trim(table.concat(part,'\n'));part={}
     if value=='' and marker then value=marker end
-    marker=nil
+    marker=nil;pending_list=false
     if value~='' then result[#result+1]=value end
   end
   for i,line in ipairs(ls) do
@@ -247,9 +719,13 @@ function M.import_text(raw,strip)
       flush()
       if not mark.body and strip~=false then marker=line end
       if strip==false or mark.body then part[#part+1]=(strip~=false and mark.body) or line end
+      pending_list=not mark.body
+    elseif timed[i] then
+      if #part>0 and not pending_list then flush() end
+      part[#part+1]=line;pending_list=false
     else
-      if not has_blank and not has_numbers then flush() end
-      part[#part+1]=line
+      if not has_blank and not has_numbers and not has_timecodes then flush() end
+      part[#part+1]=line;pending_list=false
     end
   end
   flush()
@@ -261,19 +737,49 @@ end
 function M.tab(name, text)
   return {id=uid(), name=name or 'Notes', columns={M.column('Column 1',text)}}
 end
-function M.plain(raw) return {tabs={M.tab('Notes', raw)}} end
+-- The axis marker distinguishes vertical tabs from historical top-level tabs.
+-- Historical columns retain their position; each old tab becomes a section.
+function M.board_layout(doc)
+  if doc.layout=='columns' then return doc end
+  local result={layout='columns',tabs={}}
+  for _,old_tab in ipairs(doc.tabs) do
+    for ci,old_column in ipairs(old_tab.columns) do
+      local board=result.tabs[ci]
+      if not board then board=M.tab(old_column.name);board.columns={};result.tabs[ci]=board end
+      local name=old_tab.name
+      if old_column.name~=board.name then name=name..' — '..old_column.name end
+      local section=M.column(name);section.blocks=old_column.blocks
+      board.columns[#board.columns+1]=section
+    end
+  end
+  return result
+end
+function M.plain(raw)
+  return M.board_layout({tabs={M.tab('Notes',raw~='' and raw or nil)}})
+end
 function M.serialize(doc)
-  local out = {HEADER}
+  local out = {HEADER,'@layout columns'}
   for _,tab in ipairs(doc.tabs) do
     out[#out+1] = '@tab ' .. esc(tab.name)
     for _,column in ipairs(tab.columns) do
       out[#out+1] = '@column ' .. esc(column.name)
+      if column.header_color then
+        assert(M.valid_marker(column.header_color),'Invalid group header color.')
+        out[#out+1]='@groupcolor '..column.header_color
+      end
       for _,b in ipairs(column.blocks) do
       assert(M.valid_marker(b.color),'Invalid color marker.')
       if b.color then out[#out+1]='@color '..b.color end
+      assert(b.timecode==nil or type(b.timecode)=='boolean','Invalid timecode flag.')
+      if b.timecode~=nil then
+        assert(b.kind=='text' or b.kind=='note','Timecodes require a text block.')
+        out[#out+1]='@timecode '..(b.timecode and '1' or '0')
+      end
       if b.kind == 'text' or b.kind == 'note' then
         out[#out+1] = b.kind=='note' and ('@note '..(b.checked and '1' or '0')) or '@text'
-        for _,l in ipairs(lines(b.text)) do
+        -- The parser normalizes all native EOL forms. Escape after that same
+        -- normalization, including directive-looking lines after a lone CR.
+        for _,l in ipairs(lines(norm(b.text))) do
           -- Escape directive-looking lines and escape characters, reversibly.
           out[#out+1] = l:match('^[@\\]') and '\\' .. l or l
         end
@@ -296,7 +802,7 @@ function M.parse(raw)
   local normalized = norm(raw)
   local header = normalized:match('^[^\n]*')
   local legacy = header == LEGACY_HEADER
-  if header ~= HEADER and not legacy then
+  if header ~= HEADER and header ~= PREVIOUS_HEADER and not legacy then
     if normalized:match('^# Patch34 Project Notes v') then
       return nil, 'Unsupported notes format. Original notes were not changed.'
     end
@@ -304,27 +810,35 @@ function M.parse(raw)
   end
   local ok, result = pcall(function()
     local ls, doc, tab, column, i = lines(normalized), {tabs={}}, nil, nil, 2
-    local pending_color
+    local pending_color,pending_timecode
     while i <= #ls do
       local l = ls[i]
       local before_blocks=column and #column.blocks or 0
-      if l:sub(1,5) == '@tab ' and not tab then
+      if l=='@layout columns' and i==2 and not legacy then doc.layout='columns'
+       elseif l:match('^@groupcolor ') and column and not legacy and header==HEADER then
+         local key=l:sub(13)
+         assert(not column.header_color and M.valid_marker(key),'Invalid group header color.')
+         column.header_color=key
+      elseif l:sub(1,5) == '@tab ' and not tab then
         tab = M.tab(unesc(l:sub(6))); doc.tabs[#doc.tabs+1] = tab
         if legacy then column=tab.columns[1] else tab.columns={} end
       elseif l:sub(1,8) == '@column ' and tab and not column and not legacy then
         column=M.column(unesc(l:sub(9))); tab.columns[#tab.columns+1]=column
       elseif l == '@endcolumn' and column and not legacy then
-        assert(not pending_color,'Color marker has no block.');column=nil
+        assert(not pending_color and pending_timecode==nil,'Block metadata has no block.');column=nil
       elseif l == '@endtab' and tab then
-        assert(not pending_color,'Color marker has no block.')
+        assert(not pending_color and pending_timecode==nil,'Block metadata has no block.')
         assert(legacy or not column, 'Unclosed column.')
         assert(#tab.columns>0, 'Tab has no columns.')
-        assert(#tab.columns<=8, 'A tab supports up to 8 columns.')
+        assert(doc.layout=='columns' or #tab.columns<=8, 'A tab supports up to 8 columns.')
         tab=nil; column=nil
       elseif l:match('^@color ') and column and not legacy then
         local key=l:sub(8)
         assert(not pending_color and M.valid_marker(key),'Invalid or repeated color marker.')
         pending_color=key
+      elseif (l=='@timecode' or l:match('^@timecode [01]$')) and column and not legacy then
+        assert(pending_timecode==nil,'Repeated timecode flag.')
+        pending_timecode=l~='@timecode 0'
       elseif (l == '@text' or l:match('^@note [01]$')) and column then
         local content = {}; i = i + 1
         while i <= #ls and ls[i] ~= '@end' do
@@ -352,14 +866,18 @@ function M.parse(raw)
       elseif l == '' and not tab then -- allow a trailing native-editor newline
       else error('Unexpected line ' .. i .. ': ' .. l:sub(1,70)) end
       if column and #column.blocks>before_blocks then
-        column.blocks[#column.blocks].color=pending_color;pending_color=nil
+        local block=column.blocks[#column.blocks]
+        assert(pending_timecode==nil or block.kind=='text' or block.kind=='note','Timecodes require a text block.')
+        block.color=pending_color;pending_color=nil
+        block.timecode=pending_timecode;pending_timecode=nil
       end
       i = i + 1
     end
-    assert(not pending_color,'Color marker has no block.')
+    assert(not pending_color and pending_timecode==nil,'Block metadata has no block.')
     assert(not tab, 'Unclosed tab.')
     assert(#doc.tabs>0, 'Document has no tabs.')
-    return doc
+    assert(doc.layout~='columns' or #doc.tabs<=8,'A document supports up to 8 columns.')
+    return M.board_layout(doc)
   end)
   if ok then return result end
   return nil, tostring(result)
@@ -369,6 +887,28 @@ function M.move(list, index, delta)
   if to < 1 or to > #list then return index end
   list[index], list[to] = list[to], list[index]
   return to
+end
+-- "before" is a stable destination identity; nil means the end of the list.
+function M.reorder_tab(doc,id,before,active)
+  local source,target
+  for i,tab in ipairs(doc.tabs) do
+    if tab.id==id then source=i end
+    if tab.id==before then target=i end
+  end
+  if not source or (before~=nil and not target) then return active,false end
+  target=target or (#doc.tabs+1)
+  if source<target then target=target-1 end
+  if source==target then return active,false end
+  local selected=doc.tabs[active]
+  table.insert(doc.tabs,target,table.remove(doc.tabs,source))
+  for i,tab in ipairs(doc.tabs) do if tab==selected then return i,true end end
+  return math.min(active or 1,#doc.tabs),true
+end
+function M.note_row_layout(text_h,checkbox_h,checked,metrics,min_height)
+  local height=math.max(text_h,checked and checkbox_h or 0,min_height or 0)
+  return {height=height,text_y=(height-text_h)*0.5,
+    checkbox_y=(height-checkbox_h)*0.5+metrics.note_checkbox_offset_y,
+    center=height*0.5}
 end
 function M.remove_option(b, index)
   if #b.options <= 1 then return end
@@ -394,13 +934,14 @@ function M.write_raw(session, api, next_raw)
   end
   session.write_stage='writing'
   local written,write_error=api.write(owner,next_raw)
-  if written==false then session.write_stage='rejected';return false,write_error or 'REAPER could not write these notes.' end
+  if written~=true then session.write_stage='rejected';return false,write_error or 'REAPER could not write these notes.' end
   session.write_stage='verifying'
   local actual = api.read(owner)
   -- Native editors may normalize EOLs or add a newline after @endtab.
   -- Trailing text-block newlines remain inside @text/@end and are significant.
   local same = norm(actual) == norm(next_raw)
-  if not same and (next_raw:sub(1,#HEADER)==HEADER or next_raw:sub(1,#LEGACY_HEADER)==LEGACY_HEADER) then
+  if not same and (next_raw:sub(1,#HEADER)==HEADER or next_raw:sub(1,#PREVIOUS_HEADER)==PREVIOUS_HEADER
+      or next_raw:sub(1,#LEGACY_HEADER)==LEGACY_HEADER) then
     same = norm(actual):gsub('\n+$','') == norm(next_raw):gsub('\n+$','')
   end
   if not same then
@@ -414,7 +955,21 @@ function M.write_raw(session, api, next_raw)
 end
 function M.write(session, api)
   if not session.dirty then return true end
-  return M.write_raw(session,api,M.serialize(session.doc))
+  session.write_stage='validating';session.write_attempt=nil
+  local ok,next_raw=pcall(M.serialize,session.doc)
+  if not ok then
+    session.write_stage='validation_rejected'
+    return false,'Could not serialize the local draft: '..tostring(next_raw)
+  end
+  session.write_attempt=next_raw
+  local verified,err=M.parse(next_raw)
+  if not verified then
+    session.write_stage='validation_rejected'
+    return false,'Generated notes failed validation. Native notes were not changed: '..tostring(err)
+  end
+  -- Exact raw restoration in history_step has its own allow_invalid guard;
+  -- only newly generated documents must pass this preflight.
+  return M.write_raw(session,api,next_raw)
 end
 function M.history_new() return {undo={},redo={},key=nil,time=0} end
 local function history_push(stack,state)
@@ -440,6 +995,7 @@ function M.history_step(s,api,direction)
   if not target then return false end
   local doc,err=M.parse(target.raw)
   if not doc and not target.allow_invalid then return false,err end
+  if doc then M.restore_column_views(doc,M.column_view_snapshot(s.doc),false) end
   local before={raw=s.raw,active=s.active,allow_invalid=s.history_readonly,action=target.action}
   local ok,write_err=M.write_raw(s,api,target.raw)
   if not ok then return false,write_err end
@@ -564,8 +1120,13 @@ function M.storage(r)
   function A.write(t,value)
     if not A.valid(t) then return false,'The note owner is no longer available.' end
     if t.kind=='project' then r.GetSetProjectNotes(t.proj,true,value);return true end
-    if t.kind=='item' then return r.GetSetMediaItemInfo_String(t.obj,'P_NOTES',value,true) end
-    return r.GetSetMediaTrackInfo_String(t.obj,A.track_field,value,true)
+    local ok
+    if t.kind=='item' then
+      ok=r.GetSetMediaItemInfo_String(t.obj,'P_NOTES',value,true)
+    else
+      ok=r.GetSetMediaTrackInfo_String(t.obj,A.track_field,value,true)
+    end
+    return ok,not ok and 'REAPER could not write these notes.' or nil
   end
   function A.mark(t)
     r.MarkProjectDirty(t.proj)
@@ -636,6 +1197,27 @@ end
 
 -- Recovery is an export, never a write to a note owner. Keep each source
 -- separately: a crash may interrupt serialization, a host write, or readback.
+function M.pending_changed(pending)
+  if type(pending)~='table' then return false end
+  if pending.kind=='select' then
+    local original=pending.target
+    if not original then return false end
+    if pending.label~=original.label or pending.selected~=original.selected
+        or #pending.options~=#original.options then return true end
+    for i,option in ipairs(pending.options) do
+      if option~=original.options[i] then return true end
+    end
+    return false
+  end
+  if type(pending.value)~='string' then return false end
+  if pending.original~=nil then return pending.value~=pending.original end
+  if pending.kind=='import' or pending.kind=='new_tab' then return pending.value~='' end
+  -- Rename dialogs and the retained inline-rename path share this baseline.
+  if pending.target and type(pending.target.name)=='string' then
+    return pending.value~=pending.target.name
+  end
+  return false
+end
 function M.recovery_snapshot(s,baseline,pending)
   local data={baseline=baseline or (s and s.raw) or '',
     stage=s and s.write_stage or 'not attempted',
@@ -652,7 +1234,8 @@ function M.recovery_snapshot(s,baseline,pending)
     local ok,text=pcall(function()
       if pending.kind=='select' then
         return 'Field name / Название поля:\n'..pending.label..
-          '\n\nOptions / Варианты:\n'..table.concat(pending.options,'\n')
+          '\n\nOptions / Варианты:\n'..table.concat(pending.options,'\n')..
+          '\n\nSelected option / Выбранный вариант:\n'..tostring(pending.selected)
       end
       return pending.value
     end)
@@ -710,6 +1293,7 @@ function M.suspend_session(s)
   if not s or not s.doc or s.dirty or s.error or s.conflict or s.pending or s.restore_pending or s.undo_due then return false end
   -- raw and both history stacks are retained. Dropping the model also releases
   -- its block keys from the weak read-layout cache when Lua collects them.
+  s.column_views=M.column_view_snapshot(s.doc)
   s.doc=nil;s.suspended=true;s.input_state=nil
   s.write_attempt=nil;s.write_stage=nil;s.history.key=nil
   return true
@@ -718,9 +1302,220 @@ function M.resume_session(s)
   if not s.suspended then return true end
   local doc,err=M.parse(s.raw)
   if not doc then return false,err end
+  M.restore_column_views(doc,s.column_views,true);s.column_views=nil
   s.doc=doc;s.suspended=nil
   s.active=math.min(s.active or 1,#doc.tabs)
   return true
+end
+
+-- Import draft editor. Positions are UTF-8 byte boundaries in the original
+-- text. Visual wraps live only in rows and never insert source newlines.
+function M.editor_next(text,pos)
+  if pos>=#text then return #text end
+  local lead=text:byte(pos+1)
+  local length=lead<0x80 and 1 or lead>=0xC2 and lead<0xE0 and 2
+    or lead>=0xE0 and lead<0xF0 and 3 or lead>=0xF0 and lead<0xF5 and 4 or 1
+  if pos+length>#text then return pos+1 end
+  for i=2,length do
+    local byte=text:byte(pos+i)
+    if byte<0x80 or byte>=0xC0 then return pos+1 end
+  end
+  return pos+length
+end
+function M.editor_prev(text,pos)
+  if pos<=0 then return 0 end
+  local at=pos-1
+  while at>0 do
+    local byte=text:byte(at+1)
+    if byte<0x80 or byte>=0xC0 then break end
+    at=at-1
+  end
+  return M.editor_next(text,at)==pos and at or pos-1
+end
+function M.editor_new(text)
+  return {text=text,cursor=0,anchor=0,history=M.history_new(),focused=false,focus_pending=false}
+end
+function M.editor_range(e) return math.min(e.cursor,e.anchor),math.max(e.cursor,e.anchor) end
+function M.editor_move(e,pos,extend,upstream)
+  e.cursor=math.max(0,math.min(#e.text,pos))
+  if not extend then e.anchor=e.cursor end
+  e.upstream=upstream;e.history.key=nil;e.preferred_x=nil
+end
+function M.editor_replace(e,value,now,gesture,range_first,range_last)
+  value=norm(value):gsub('%z','')
+  local selected_first,selected_last=M.editor_range(e)
+  local first,last=range_first or selected_first,range_last or selected_last
+  local text=e.text:sub(1,first)..value..e.text:sub(last+1)
+  if text==e.text then return false end
+  local previous={key='import',cursor=e.cursor,first=selected_first,last=selected_last}
+  local cursor=first+#value
+  local current={key='import',cursor=cursor,first=cursor,last=cursor}
+  local h=e.history
+  local group=M.text_edit(h,'import',e.text,text,previous,current,gesture)
+  if not (group and h.key==group and now-h.time<0.8 and #h.redo==0) then
+    history_push(h.undo,{raw=e.text,cursor=e.cursor,anchor=e.anchor,upstream=e.upstream})
+  end
+  h.redo={};h.key=group;h.time=now
+  e.text=text;e.cursor=cursor;e.anchor=cursor;e.upstream=nil;e.preferred_x=nil;e.rows=nil
+  return true
+end
+function M.editor_history(e,direction)
+  local h=e.history
+  local from=direction<0 and h.undo or h.redo
+  local to=direction<0 and h.redo or h.undo
+  local state=from[#from]
+  if not state then return false end
+  history_push(to,{raw=e.text,cursor=e.cursor,anchor=e.anchor,upstream=e.upstream})
+  table.remove(from)
+  e.text=state.raw;e.cursor=state.cursor;e.anchor=state.anchor;e.upstream=state.upstream
+  e.rows=nil;e.preferred_x=nil;h.key=nil
+  return true
+end
+function M.editor_word(text,pos,direction)
+  local function space(at)
+    local nextpos=M.editor_next(text,at)
+    return text:sub(at+1,nextpos):match('^%s+$')~=nil
+  end
+  if direction<0 then
+    while pos>0 and space(M.editor_prev(text,pos)) do pos=M.editor_prev(text,pos) end
+    while pos>0 and not space(M.editor_prev(text,pos)) do pos=M.editor_prev(text,pos) end
+  else
+    while pos<#text and not space(pos) do pos=M.editor_next(text,pos) end
+    while pos<#text and space(pos) do pos=M.editor_next(text,pos) end
+  end
+  return pos
+end
+function M.editor_rows(text,width,measure)
+  local rows={}
+  local first,pos,x,space,space_x=0,0,0,nil,nil
+  width=math.max(1,width)
+  local function push(last,hard,row_width)
+    rows[#rows+1]={first=first,last=last,hard=hard,width=row_width}
+    first=last+(hard and 1 or 0);pos=first;x=0;space=nil;space_x=nil
+  end
+  while pos<#text do
+    local nextpos=M.editor_next(text,pos)
+    local char=text:sub(pos+1,nextpos)
+    if char=='\n' then push(pos,true,x)
+    else
+      local w=measure(char)
+      if x+w>width and pos>first and not char:match('^%s+$') then
+        if space and space>first then push(space,false,space_x)
+        else push(pos,false,x) end
+      else
+        x=x+w;pos=nextpos
+        if char:match('^%s+$') then space=pos;space_x=x end
+      end
+    end
+  end
+  rows[#rows+1]={first=first,last=#text,hard=false,width=x}
+  return rows
+end
+function M.editor_row(e,rows)
+  -- Binary search keeps vertical movement fast in long imported documents.
+  local lo,hi=1,#rows
+  while lo<hi do
+    local mid=math.floor((lo+hi+1)/2)
+    if rows[mid].first<=e.cursor then lo=mid else hi=mid-1 end
+  end
+  if e.upstream and lo>1 and rows[lo].first==e.cursor and not rows[lo-1].hard then lo=lo-1 end
+  return lo
+end
+function M.editor_x(text,row,pos,measure)
+  local x,at=0,row.first
+  while at<math.min(pos,row.last) do
+    local after=M.editor_next(text,at)
+    x=x+measure(text:sub(at+1,after));at=after
+  end
+  return x
+end
+function M.editor_hit(text,row,x,measure)
+  local at,previous=row.first,0
+  while at<row.last do
+    local after=M.editor_next(text,at)
+    local advance=measure(text:sub(at+1,after))
+    if x<previous+advance*0.5 then return at end
+    previous=previous+advance;at=after
+  end
+  return row.last
+end
+function M.editor_vertical(e,rows,delta,measure)
+  local row=M.editor_row(e,rows)
+  local x=e.preferred_x or M.editor_x(e.text,rows[row],e.cursor,measure)
+  local target=math.max(1,math.min(#rows,row+delta))
+  local pos=M.editor_hit(e.text,rows[target],x,measure)
+  return pos,x,pos==rows[target].last and not rows[target].hard
+end
+
+-- Model locations are resolved again at delivery time. Payloads never contain
+-- serialized note data, and a stale owner/column cannot delete the source.
+function M.note_location(doc,block)
+  for ti,tab in ipairs(doc.tabs) do
+    for _,column in ipairs(tab.columns) do
+      for i,candidate in ipairs(column.blocks) do
+        if candidate==block then return tab,column,i,ti end
+      end
+    end
+  end
+end
+function M.note_column(doc,column)
+  for ti,tab in ipairs(doc.tabs) do
+    for _,candidate in ipairs(tab.columns) do if candidate==column then return tab,ti end end
+  end
+end
+function M.note_drop_plan(doc,block,target,anchor,after,grouped,hide)
+  local _,source,from=M.note_location(doc,block)
+  local tab,ti=M.note_column(doc,target)
+  if not source or not tab or anchor==block then return nil end
+  if source==target and not anchor then
+    local later=false
+    for i=from+1,#target.blocks do
+      local candidate=target.blocks[i]
+      if M.visible(candidate,hide) and (not grouped or M.completed(candidate)==M.completed(block)) then later=true;break end
+    end
+    if not later then return nil end
+  end
+  local at=#target.blocks+1
+  if anchor then
+    local found
+    for i,candidate in ipairs(target.blocks) do if candidate==anchor then found=i;break end end
+    if not found or (grouped and M.completed(block)~=M.completed(anchor)) then return nil end
+    at=found+(after and 1 or 0)
+  end
+  if source==target and from<at then at=at-1 end
+  if source==target and from==at then return nil end
+  return {source=source,from=from,target=target,at=at,tab=tab,tab_index=ti}
+end
+function M.note_move(doc,block,target,anchor,after,grouped,hide)
+  local plan=M.note_drop_plan(doc,block,target,anchor,after,grouped,hide)
+  if not plan then return false end
+  table.remove(plan.source.blocks,plan.from)
+  table.insert(plan.target.blocks,plan.at,block)
+  return true,plan.tab,plan.tab_index
+end
+
+-- One insertion position for every boundary between visible notes (N+1).
+-- Geometry is read from already rendered blocks, not from overlay ImGui items.
+-- A single section-level native drag target consumes the selected boundary.
+function M.note_insertion_slot(rects,mouse_y)
+  if #rects==0 then return nil,false,nil end
+  local best_distance,best_anchor,best_after,best_y=math.huge,nil,false,nil
+  for i=1,#rects+1 do
+    local anchor,after,y
+    if i<=#rects then
+      anchor=rects[i].block;after=false
+      if i==1 then y=rects[1].y
+      else y=(rects[i-1].bottom+rects[i].y)*0.5 end
+    else
+      anchor=rects[#rects].block;after=true
+      y=rects[#rects].bottom+2
+    end
+    local distance=math.abs(mouse_y-y)
+    if distance<best_distance then
+      best_distance=distance;best_anchor=anchor;best_after=after;best_y=y
+    end
+  end
+  return best_anchor,best_after,best_y
 end
 
 if ... == '__test' then return M end
@@ -740,7 +1535,7 @@ local TITLE, PREF = 'ReaNotepad', 'Patch34_Project_Notes'
 local CONTEXT_NAME = 'Patch34 Project Notes'
 local startup_layout_frames=0
 local STARTUP_LAYOUT_FRAMES=2
-local ctx, font, ui_font, input_callback
+local ctx, font, ui_font, heading_bold_font, input_callback
 local sessions, session, modal, open_modal = {}, nil, nil, nil
 local session_sweep={cursor=nil}
 local SESSION_CHECKS_PER_FRAME=8
@@ -749,24 +1544,8 @@ local epoch, changed, undo_boundary, force_tab = 0, false, false, nil
 local edit_key, edit_action, history_request
 local tab_rename, escape_pressed = nil, false
 local bulk_selection
+local UI
 local frame_checkpoint, crashed, recovery_sequence = nil, false, 0
--- Shared layout metrics. Viewer button/slider geometry is retained; spacing
--- between groups is separate from spacing inside a control or between rows.
-local UI_METRICS = {
-  font_size=13, window_pad_x=12, window_pad_y=10,
-  frame_pad_x=6, frame_pad_y=3, item_gap_x=8, item_gap_y=8,
-  group_gap=16, inner_gap=8, checkbox_label_gap=6,
-  scope_min_width=110, slider_width=140, slider_min_width=64,
-  button_pad_x=8, button_pad_y=3, button_min_height=23,
-  compact_button_pad_x=10, checkbox_pad_y=1,
-  column_name_min_width=60, button_rounding=3,
-  slider_row_height=22, slider_knob_radius=6, slider_outline=1.5,
-  slider_track_height=3, slider_circle_segments=24, slider_outline_normal=1.2,
-  dropdown_width=420,
-  confirm_min_width=280, confirm_max_width=520,
-  read_line_gap=2, popup_margin=12, popup_footer_gap=8,
-  popup_sizes={restore={580,460},name={320,110},select={500,460},import={860,440},about={360,210}},
-}
 local language=reaper.GetExtState(PREF,'language')=='ru' and 'ru' or 'en'
 local pending_language, pending_theme
 local RU = {
@@ -776,7 +1555,6 @@ local RU = {
   ["Color..."]="Цвет…", ["Color marker"]="Цветовая метка",
   ["No marker"]="Без метки", ["Red"]="Красная", ["Orange"]="Оранжевая",
   ["Yellow"]="Жёлтая", ["Green"]="Зелёная", ["Blue"]="Синяя", ["Purple"]="Фиолетовая",
-  ["Done"]="Готово",
   ["Delete selected elements?"]="Удалить выделенные элементы?",
   ["Delete %d selected elements?"]="Удалить выделенные элементы: %d?",
 
@@ -807,17 +1585,21 @@ local RU = {
   ["Paste text or a numbered list on the left. The notes to be added appear on the right."]="Вставь текст или нумерованный список слева. Справа появятся заметки, которые будут добавлены.",
   ["Separate paragraphs with a blank line. In a numbered list, start each new item on a new line."]="Разделяй абзацы пустой строкой. В нумерованном списке начинай каждый новый пункт с новой строки.",
   ["Source text"]="Исходный текст",
-  ["Destination column"]="Колонка для импорта",
+  ["Destination tab"]="Вкладка для импорта",
   ["Paste text to see the resulting notes."]="Вставь текст, чтобы увидеть будущие заметки.",
   ["Undo"]="Отменить",
   ["Redo"]="Повторить",
-  ["New tab"]="Новая вкладка",
+  ["New tab"]="Новая вкладка", ["Switch to tab"]="Открыть вкладку",
   ["Rename"]="Переименовать",
   ["Move left"]="Сдвинуть влево",
   ["Move right"]="Сдвинуть вправо",
   ["Delete tab..."]="Удалить вкладку…",
-  ["Column"]="Колонка",
-  ["Edit mode"]="Режим редактирования",
+  ["Column"]="Колонка", ["Tabs"]="Вкладки", ["New group"]="Новая группа",
+  ["Groups"]="Группы", ["Group"]="Группа", ["New group below"]="Новая группа ниже",
+  ["Rename group"]="Переименовать группу", ["Delete group..."]="Удалить группу…",
+  ["Delete group?"]="Удалить группу?", ["Delete this group and its contents?"]="Удалить эту группу вместе с содержимым?",
+  ["Move to group"]="В другую группу", ["Group header color"]="Цвет заголовка группы",
+  ["No color"]="Без цвета",
   ["Note with checkbox"]="Заметка с чекбоксом",
   ["Import text..."]="Импорт текста…",
   ["Text"]="Текст",
@@ -829,7 +1611,6 @@ local RU = {
   ["Edit field..."]="Изменить поле…",
   ["Delete..."]="Удалить…",
   ["Edit..."]="Изменить…",
-  ["Edit notes"]="Правка",
   ["Rename column..."]="Переименовать колонку…",
   ["Move column left"]="Колонку влево",
   ["Move column right"]="Колонку вправо",
@@ -837,6 +1618,9 @@ local RU = {
   ["Hide completed"]="Скрыть выполненные",
   ["Completed notes last"]="Выполненные в конце",
   ["Color marker style"]="Оформление цветовых меток",
+  ["Note spacing"]="Интервал между заметками",
+  ["Gap above and below the separator"]="Отступ над и под сепаратором",
+  ["Reset spacing"]="Сбросить интервал",
   ["Left strip"]="Полоска слева",
   ["Whole note"]="Фон всей заметки",
   ["Font"]="Шрифт",
@@ -854,12 +1638,40 @@ local RU = {
   ["Import"]="Импорт",
   ["+ Option"]="+ Вариант",
   ["Remove numbering"]="Удалять нумерацию",
+  ["Recognize timecodes"]="Распознавать таймкоды",
+  ["No notes yet"]="Заметок пока нет",
+  ["Drag to move note"]="Перетащи, чтобы переместить заметку",
+  ["Expand column"]="Развернуть колонку",
+  ["Minimize column"]="Свернуть колонку",
+  ["Columns"]="Колонки",
+  ["New column"]="Новая колонка",
+  ["Notes"]="Заметки",
+  ["New tab below"]="Добавить вкладку ниже",
+  ["Delete note by dropping here"]="Перетащи сюда заметку, чтобы удалить",
+  ["Drop to delete"]="Удалить",
+  ["Rename tab"]="Переименовать вкладку",
+  ["Move to tab"]="Переместить во вкладку",
+  ["Drag or click an icon, then choose a tab."]="Перетащи значок или нажми его и выбери вкладку.",
+  ["Choose a tab. Esc cancels."]="Выбери вкладку. Esc — отмена.",
+  ["Choose a group. Esc cancels."]="Выбери группу. Esc — отмена.",
+  ["Drag or click an icon, then choose a group."]="Перетащи значок или нажми его и выбери группу.",
+  ["Click a highlighted tab heading to add here."]="Нажми на подсвеченный заголовок вкладки, чтобы добавить сюда.",
+  ["Click or drop into this tab to add here."]="Нажми или перетащи элемент в эту вкладку, чтобы добавить его.",
+  ["Discard note changes?"]="Отменить изменения заметки?",
+  ["The note has unsaved changes. Discard them?"]="В заметке есть несохранённые изменения. Отменить их?",
+  ["Discard changes"]="Отменить изменения",
+  ["Continue editing"]="Продолжить правку",
+  ["Double-click to go to timecode"]="Двойной щелчок — перейти к таймкоду",
+  ["Timeline position"]="Позиция на таймлайне",
+  ["Timecodes: MM:SS, HH:MM:SS or HH:MM:SS:FF (project FPS); optional milliseconds without frames. Double-click the clock/time indicator to jump."]="Таймкоды: ММ:СС, ЧЧ:ММ:СС или ЧЧ:ММ:СС:КК (кадры по FPS проекта); миллисекунды — без кадров. Двойной щелчок по значку часов или времени — переход.",
   ["Preview: %d notes"]="Предпросмотр: заметок — %d",
   ["Field name"]="Название поля",
   ["Options (select a circle to set the current value)"]="Варианты (отметь кружком текущее значение)",
   ["Edit dropdown"]="Редактирование списка",
   ["Rename column"]="Название колонки",
   ["Delete item?"]="Удалить элемент?",
+  ["Delete note?"]="Удалить заметку?",
+  ["Delete this note and its contents?"]="Удалить эту заметку?",
   ["Delete tab?"]="Удалить вкладку?",
   ["Delete column?"]="Удалить колонку?",
   ["Delete this tab and its contents?"]="Удалить эту вкладку вместе с содержимым?",
@@ -897,135 +1709,26 @@ local RU = {
 local function tr(text) return language=='ru' and (RU[text] or text) or text end
 local function ui_label(text) return tr(text)..'###'..text end
 local theme = reaper.GetExtState(PREF,'theme')
-local size = math.max(12,math.min(32,tonumber(reaper.GetExtState(PREF,'size')) or 16))
+local size = math.max(UI_METRICS.note_text_min_size,math.min(UI_METRICS.note_text_max_size,
+  tonumber(reaper.GetExtState(PREF,'size')) or UI_METRICS.note_text_default_size))
 local hide_completed=reaper.GetExtState(PREF,'hide_completed')=='1'
 local completed_last=reaper.GetExtState(PREF,'completed_last')=='1'
 local marker_style=reaper.GetExtState(PREF,'marker_style')=='fill' and 'fill' or 'strip'
+local note_spacing=tonumber(reaper.GetExtState(PREF,'note_spacing')) or UI_METRICS.note_spacing_default
+note_spacing=math.floor(math.max(UI_METRICS.note_spacing_min,math.min(UI_METRICS.note_spacing_max,note_spacing)))
 local dock_request
 local last_docker=tonumber(reaper.GetExtState(PREF,'last_docker')) or -1
 if last_docker>-1 or last_docker< -16 then last_docker=-1 end
-local editing = reaper.GetExtState(PREF,'editing') ~= '0'
 local scope=reaper.GetExtState(PREF,'scope')
 if scope~='track' and scope~='item' then scope='project' end
 local scope_labels={project='Project',track='Track',item='Item'}
 local selection_message
 local api=M.storage(reaper)
-local function rgba(r,g,b,a) return (r<<24)|(g<<16)|(b<<8)|(a or 255) end
--- Viewer color roles are the only palette definitions. Native tabs/checks
--- use the agreed role mapping below; unused search/document roles are omitted.
-local VIEWER_THEMES = {
-  paper = {
-    label = "Pages",
-
-    C_PAPER = rgba(217, 215, 209),
-    C_TEXT = rgba(28, 28, 28),
-    C_DIM = rgba(153, 153, 153),
-
-    C_CHROME = rgba(236, 234, 229),
-    C_CHROME_DEEP = rgba(208, 206, 201),
-    C_CHROME_TITLE = rgba(236, 234, 229),
-
-    C_HEAD = rgba(225, 223, 218),
-    C_HEAD_H = rgba(208, 206, 201),
-    C_FRAME = rgba(245, 244, 240),
-
-    C_LINE = rgba(208, 206, 201),
-    C_MENU_BORDER = rgba(208, 206, 201),
-    C_SCROLL = rgba(158, 155, 149),
-    C_SCROLL_H = rgba(174, 172, 166),
-    C_SCROLL_A = rgba(140, 137, 131),
-    C_SCROLL_BG = rgba(217, 215, 209),
-
-    C_VIEW_SLIDER_TRACK = rgba(200, 198, 192),
-    C_VIEW_SLIDER_FILL = rgba(74, 124, 199),
-    C_VIEW_SLIDER_KNOB_FILL = rgba(245, 244, 240),
-    C_VIEW_SLIDER_KNOB_OUTLINE = rgba(74, 124, 199),
-
-    C_VIEW_BUTTON_FILL = rgba(245, 244, 240),
-    C_VIEW_BUTTON_HOVER = rgba(236, 234, 229),
-    C_VIEW_BUTTON_ACTIVE = rgba(225, 223, 218),
-    C_VIEW_BUTTON_BORDER = rgba(208, 206, 201),
-
-  },
-
-  grey = {
-    label = "REAPER Grey",
-
-    C_PAPER = rgba(239, 239, 239),
-    C_TEXT = rgba(28, 24, 18),
-    C_DIM = rgba(112, 112, 112),
-
-    C_CHROME = rgba(218, 218, 218),
-    C_CHROME_DEEP = rgba(92, 112, 104),
-    C_CHROME_TITLE = rgba(112, 132, 122),
-
-    C_HEAD = rgba(202, 206, 210),
-    C_HEAD_H = rgba(188, 193, 198),
-    C_FRAME = rgba(250, 250, 250),
-
-    C_LINE = rgba(104, 120, 114),
-    C_MENU_BORDER = rgba(104, 120, 114, 60),
-    C_SCROLL = rgba(176, 176, 176),
-    C_SCROLL_H = rgba(154, 154, 154),
-    C_SCROLL_A = rgba(132, 132, 132),
-    C_SCROLL_BG = rgba(239, 239, 239),
-
-    C_VIEW_SLIDER_TRACK = rgba(196, 196, 196),
-    C_VIEW_SLIDER_FILL = rgba(86, 104, 124),
-    C_VIEW_SLIDER_KNOB_FILL = rgba(252, 252, 252),
-    C_VIEW_SLIDER_KNOB_OUTLINE = rgba(86, 104, 124),
-
-    C_VIEW_BUTTON_FILL = rgba(238, 238, 238),
-    C_VIEW_BUTTON_HOVER = rgba(226, 226, 226),
-    C_VIEW_BUTTON_ACTIVE = rgba(214, 214, 214),
-    C_VIEW_BUTTON_BORDER = rgba(174, 174, 174),
-
-  },
-
-  white = {
-    label = "Google Docs White",
-
-    C_PAPER = rgba(241, 243, 244),
-    C_TEXT = rgba(32, 33, 36),
-    C_DIM = rgba(95, 99, 104),
-
-    C_CHROME = rgba(248, 250, 253),
-    C_CHROME_DEEP = rgba(232, 240, 254),
-    C_CHROME_TITLE = rgba(248, 250, 253),
-
-    C_HEAD = rgba(232, 240, 254),
-    C_HEAD_H = rgba(210, 227, 252),
-    C_FRAME = rgba(255, 255, 255),
-
-    C_LINE = rgba(218, 220, 224),
-    C_MENU_BORDER = rgba(218, 220, 224),
-    C_SCROLL = rgba(189, 193, 198),
-    C_SCROLL_H = rgba(154, 160, 166),
-    C_SCROLL_A = rgba(128, 134, 139),
-    C_SCROLL_BG = rgba(241, 243, 244),
-
-    C_VIEW_SLIDER_TRACK = rgba(218, 220, 224),
-    C_VIEW_SLIDER_FILL = rgba(26, 115, 232),
-    C_VIEW_SLIDER_KNOB_FILL = rgba(255, 255, 255),
-    C_VIEW_SLIDER_KNOB_OUTLINE = rgba(26, 115, 232),
-
-    C_VIEW_BUTTON_FILL = rgba(255, 255, 255),
-    C_VIEW_BUTTON_HOVER = rgba(241, 243, 244),
-    C_VIEW_BUTTON_ACTIVE = rgba(232, 240, 254),
-    C_VIEW_BUTTON_BORDER = rgba(218, 220, 224),
-
-  },
-}
--- Dark is the approved exception to the three supplied Viewer themes.
-do
-  local bg,paper,chrome=rgba(30,32,36),rgba(37,40,45),rgba(44,47,53)
-  local text,dim,line=rgba(231,233,237),rgba(160,166,177),rgba(75,81,92)
-  local hover,accent=rgba(61,68,80),rgba(116,170,238)
-  VIEWER_THEMES.dark={label='Dark',C_PAPER=bg,C_FRAME=paper,C_TEXT=text,C_DIM=dim,C_CHROME=chrome,
-    C_CHROME_DEEP=chrome,C_CHROME_TITLE=chrome,C_HEAD=hover,C_HEAD_H=line,
-    C_LINE=line,C_MENU_BORDER=line,C_SCROLL=line,C_SCROLL_H=dim,C_SCROLL_A=dim,C_SCROLL_BG=bg,
-    C_VIEW_BUTTON_FILL=chrome,C_VIEW_BUTTON_HOVER=hover,C_VIEW_BUTTON_ACTIVE=line,C_VIEW_BUTTON_BORDER=line,
-    C_VIEW_SLIDER_TRACK=line,C_VIEW_SLIDER_FILL=accent,C_VIEW_SLIDER_KNOB_FILL=paper,C_VIEW_SLIDER_KNOB_OUTLINE=accent}
+-- Read FPS from the actual note owner's project, not the currently active tab.
+-- A second return value tells whether its SMPTE timecode is drop-frame.
+local function project_timecode_settings()
+  if not session or not session.proj then return nil,false end
+  return reaper.TimeMap_curFrameRate(session.proj)
 end
 -- Short component aliases are derived once, never redefined or overwritten.
 local themes={}
@@ -1046,6 +1749,9 @@ local function recovery_root()
   return reaper.GetResourcePath()..'/Data/Patch34_Project_Notes_Recovery'
 end
 local function save_recovery(s,reason,baseline,pending)
+  -- Uncommitted note text lives outside s.doc. Every recovery path must
+  -- include the current owner's draft, not only modal/rename text.
+  if pending==nil and UI and UI.recovery_pending then pending=UI.recovery_pending(s) end
   local data=M.recovery_snapshot(s,baseline,pending)
   local ok,result=pcall(function()
     recovery_sequence=recovery_sequence+1
@@ -1073,7 +1779,7 @@ local function save_recovery(s,reason,baseline,pending)
     local target=s and s.target or {}
     local title_ok,title=pcall(api.title,target)
     local report=table.concat({
-      'ReaNotepad 0.5.11 — recovery / аварийная копия',
+      'ReaNotepad '..VERSION..' — recovery / аварийная копия',
       'Owner / Объект: '..(title_ok and title or tostring(target.key)),
       'Kind / Тип: '..tostring(target.kind),'GUID: '..tostring(target.guid),
       'Session key / Ключ сеанса: '..tostring(target.key),
@@ -1084,7 +1790,7 @@ local function save_recovery(s,reason,baseline,pending)
       'baseline.notes: last known notes before this operation / заметки до операции.',
       'draft.notes: in-memory document, possibly partial / черновик, операция могла быть прервана.',
       'attempt.notes: exact attempted write, if any / содержимое попытки записи, если она была.',
-      'pending.txt: unapplied popup or rename text / неприменённый текст окна или переименования.',
+      'pending.txt: unapplied note, popup or rename text / неприменённый текст заметки, окна или переименования.',
       'Restore: select the intended Project/Track/Item, then Edit > Open recovery copy.',
       'Review the .notes file in the preview before Restore. No automatic restoration.',
       'Восстановление: выбери нужный проект/дорожку/айтем → Правка → Открыть аварийную копию.',
@@ -1112,10 +1818,14 @@ local function save_recovery(s,reason,baseline,pending)
   return result
 end
 
+local function save_pending_recovery(s,reason)
+  local pending=UI and UI.recovery_pending and UI.recovery_pending(s,true)
+  if pending then return save_recovery(s,reason,s.raw,pending) end
+end
 local function load_notes(s,raw)
   s.raw=raw; s.doc,s.error=M.parse(raw); s.dirty=false; s.conflict=nil; s.undo_due=nil
   s.active=math.min(s.active or 1,s.doc and #s.doc.tabs or 1)
-  s.history=M.history_new(); s.pending=nil;s.input_state=nil;s.suspended=nil
+  s.history=M.history_new(); s.pending=nil;s.input_state=nil;s.suspended=nil;s.column_views=nil
   s.recovery=nil;s.write_attempt=nil;s.write_stage=nil
   s.history_readonly=nil;s.restore_pending=nil
   epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; tab_rename=nil
@@ -1134,6 +1844,39 @@ end
 local function sync_project()
   local target,message=api.resolve(scope)
   selection_message=message
+  local edit=UI and UI.note_edit
+  if edit and edit.owner==session and session and session.target
+      and (not target or target.key~=session.target.key) then
+    if api.valid(session.target) then
+      local native=api.read(session.target)
+      if native==session.raw and not session.conflict and not session.error then
+        local before={raw=session.raw,active=session.active,allow_invalid=session.history_readonly}
+        UI.end_note_edit()
+        if changed then
+          session.dirty=true
+          local ok,err=M.write(session,api)
+          if ok then
+            M.history_record(session.history,before,session.raw,nil,reaper.time_precise(),'edit_note')
+            session.undo_due=reaper.time_precise()+0.8
+          else
+            session.error=err;save_recovery(session,err,before.raw)
+          end
+          changed=false;edit_key=nil;edit_action=nil
+        end
+      else
+        save_recovery(session,'Notes changed during an active edit / Заметки изменились во время правки',
+          session.raw,{value=edit.value})
+        UI.end_note_edit(true)
+      end
+    else
+      save_recovery(session,'Note owner removed during active edit / Объект заметки удалён во время правки',
+        session.raw,{value=edit.value})
+      UI.end_note_edit(true)
+    end
+  end
+  if session and (not target or target.key~=session.target.key) then
+    save_pending_recovery(session,'Note owner changed during an active draft / Объект изменён во время редактирования черновика')
+  end
   -- The selected/previous owner never waits for the background sweep.
   if session and not api.valid(session.target) then
     discard_removed_session(session);sessions[session.target.key]=nil;session=nil
@@ -1166,7 +1909,23 @@ local function sync_project()
     epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; tab_rename=nil; force_tab=nil
   end
   local native=api.read(session.target)
-  if not session.dirty and native~=session.raw then load_notes(session,native)
+  -- An unresolved external conflict must remain read-only until the user
+  -- explicitly reloads, even if the draft itself had not been written yet.
+  if session.conflict and native~=session.raw then return true end
+  if session.conflict and native==session.raw then session.conflict=nil end
+  if not session.dirty and native~=session.raw then
+    local pending=UI and UI.recovery_pending(session,true)
+    if pending then
+      save_pending_recovery(session,'External edit during an active draft / Внешняя правка во время редактирования черновика')
+      if UI.note_edit and UI.note_edit.owner==session then UI.end_note_edit(true) end
+      -- Preserve the local model and exported draft until explicit reload.
+      -- draw_modal closes its stale native popup from the stable root scope.
+      modal=nil;open_modal=nil;tab_rename=nil
+      session.conflict=native
+    else
+      if UI and UI.note_edit and UI.note_edit.owner==session then UI.end_note_edit(true) end
+      load_notes(session,native)
+    end
   elseif session.dirty and native~=session.raw then session.conflict=native
   elseif session.suspended then
     local ok,err=M.resume_session(session)
@@ -1175,6 +1934,7 @@ local function sync_project()
   return true
 end
 local function request_modal(m)
+  if UI then UI.end_note_edit() end
   if session then session.history.key=nil;session.input_state=nil end
   tab_rename=nil
   m.focus=true; modal=m; open_modal=m.title
@@ -1188,41 +1948,12 @@ local function begin_action_popup(id)
   end
   return true
 end
-local function begin_tab_rename(tab)
-  session.history.key=nil;session.input_state=nil
-  tab_rename={target=tab,value=tab.name,focus=true}
-  force_tab=tab.id
-end
 local function finish_tab_rename(apply)
   local edit=tab_rename
   if apply and edit and edit.value:match('%S') and edit.value~=edit.target.name then
     edit.target.name=edit.value; touch(nil,'rename_tab'); undo_boundary=true
   end
   tab_rename=nil
-end
-local function draw_tab_rename(rect)
-  if not tab_rename then return end
-  if escape_pressed then finish_tab_rename(false); return end
-  if not rect then return end
-  local edit=tab_rename
-  local x1,y1,x2,y2=table.unpack(rect)
-  if x2-x1<=12 or y2<=y1 then return end
-  local sx,sy=ImGui.GetCursorScreenPos(ctx)
-  ImGui.PushID(ctx,edit.target.id)
-  ImGui.PushClipRect(ctx,x1,y1,x2,y2,true)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,3,1)
-  ImGui.SetCursorScreenPos(ctx,x1+4,y1+2)
-  ImGui.SetNextItemWidth(ctx,x2-x1-8)
-  local just_focused=edit.focus
-  if just_focused then ImGui.SetKeyboardFocusHere(ctx); edit.focus=nil end
-  local enter,value=ImGui.InputText(ctx,'##tab_name_inline',edit.value,
-    ImGui.InputTextFlags_AutoSelectAll|ImGui.InputTextFlags_EnterReturnsTrue)
-  edit.value=value
-  local blurred=not just_focused and ImGui.IsItemDeactivated(ctx)
-  ImGui.PopStyleVar(ctx); ImGui.PopClipRect(ctx); ImGui.PopID(ctx)
-  ImGui.SetCursorScreenPos(ctx,sx,sy)
-  ImGui.Dummy(ctx,0,0) -- Submit restored layout position before End (ReaImGui 0.10).
-  if (enter and value:match('%S')) or blurred then finish_tab_rename(true) end
 end
 local function confirm_delete(action,object)
   object=object or 'item'
@@ -1261,21 +1992,30 @@ local function styles()
     Separator=t.line,ScrollbarBg=v.C_SCROLL_BG,ScrollbarGrab=v.C_SCROLL,ScrollbarGrabHovered=v.C_SCROLL_H,
     ScrollbarGrabActive=v.C_SCROLL_A,Tab=t.chrome,TabHovered=t.hover,TabSelected=theme=='dark' and t.hover or t.paper,
     TabDimmed=t.chrome,TabDimmedSelected=theme=='dark' and t.hover or t.paper,
-    TabSelectedOverline=t.accent,TextSelectedBg=(t.accent & 0xffffff00)|65,
+    TabSelectedOverline=t.accent,TextSelectedBg=(t.accent & 0xffffff00)|UI_PALETTE.text_selection_alpha,
     SliderGrab=t.accent,SliderGrabActive=t.accent,
-    ModalWindowDimBg=rgba(0,0,0,theme=='dark' and 140 or 90)}
-  local count=0
+    ModalWindowDimBg=theme=='dark' and UI_PALETTE.modal_dim_dark or UI_PALETTE.modal_dim_light}
+  local count,var_count=0,0
   for k,v in pairs(colors) do ImGui.PushStyleColor(ctx,ImGui['Col_'..k],v); count=count+1 end
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,UI_METRICS.window_pad_x,UI_METRICS.window_pad_y)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,UI_METRICS.frame_pad_x,UI_METRICS.frame_pad_y)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,UI_METRICS.item_gap_x,UI_METRICS.item_gap_y)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemInnerSpacing,UI_METRICS.checkbox_label_gap,UI_METRICS.item_gap_y)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FrameRounding,3)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ChildRounding,0)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FrameBorderSize,1)
-  return count
+  local function push_var(...)
+    ImGui.PushStyleVar(ctx,...);var_count=var_count+1
+  end
+  push_var(ImGui.StyleVar_WindowPadding,UI_METRICS.window_pad_x,UI_METRICS.window_pad_y)
+  push_var(ImGui.StyleVar_FramePadding,UI_METRICS.frame_pad_x,UI_METRICS.frame_pad_y)
+  push_var(ImGui.StyleVar_ItemSpacing,UI_METRICS.item_gap_x,UI_METRICS.item_gap_y)
+  push_var(ImGui.StyleVar_ItemInnerSpacing,UI_METRICS.checkbox_label_gap,UI_METRICS.item_gap_y)
+  push_var(ImGui.StyleVar_FrameRounding,UI_METRICS.frame_rounding)
+  push_var(ImGui.StyleVar_ChildRounding,UI_METRICS.child_rounding)
+  push_var(ImGui.StyleVar_FrameBorderSize,UI_METRICS.frame_border_size)
+  return count,var_count
 end
-local UI={menu_open=nil,info=nil,open_info=nil,slider_state={},read_cache=setmetatable({},{__mode="k"})}
+UI={menu_open=nil,info=nil,open_info=nil,slider_state={},read_cache=setmetatable({},{__mode="k"})}
+function UI.recovery_pending(owner,changed_only)
+  local pending
+  if owner==session and (tab_rename or modal) then pending=tab_rename or modal
+  elseif UI.note_edit and UI.note_edit.owner==owner then pending=UI.note_edit end
+  if pending and (not changed_only or M.pending_changed(pending)) then return pending end
+end
 function UI.clamp(v,lo,hi) return math.floor(math.max(lo,math.min(hi,v))+0.5) end
 function UI.slider(id, value, min_value, max_value, width, reset_value)
   local sx, sy = ImGui.GetCursorScreenPos(ctx)
@@ -1283,6 +2023,7 @@ function UI.slider(id, value, min_value, max_value, width, reset_value)
 
   -- The hit/layout rectangle includes the knob and its outline at both ends.
   local inset=UI_METRICS.slider_knob_radius+UI_METRICS.slider_outline
+  width=math.max(2*inset+1,width)
   local track_width=math.max(1,width-2*inset)
   local track_x1 = sx + inset
   local track_x2 = track_x1 + track_width
@@ -1365,6 +2106,7 @@ function UI.slider(id, value, min_value, max_value, width, reset_value)
 end
 
 function UI.source_button(id, label, width, height, selected)
+  width,height=math.max(1,width),math.max(1,height)
   local sx, sy = ImGui.GetCursorScreenPos(ctx)
   local dl = ImGui.GetWindowDrawList(ctx)
 
@@ -1404,7 +2146,7 @@ function UI.source_button(id, label, width, height, selected)
     ImGui.GetColorEx(ctx,themes[theme].viewer.C_VIEW_BUTTON_BORDER),
     UI_METRICS.button_rounding,
     ImGui.DrawFlags_None,
-    1.0
+    UI_METRICS.button_border_size
   )
 
   local text_w, text_h = ImGui.CalcTextSize(ctx, label)
@@ -1438,13 +2180,6 @@ function UI.button(_,caption,compact)
   return clicked
 end
 -- Native checkbox geometry follows the UI font, independently of note text.
-function UI.checkbox_width(caption)
-  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
-  local w=ImGui.GetTextLineHeight(ctx)+2*UI_METRICS.checkbox_pad_y+
-    UI_METRICS.checkbox_label_gap+ImGui.CalcTextSize(ctx,caption)
-  ImGui.PopFont(ctx)
-  return w
-end
 function UI.checkbox(caption,value)
   ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,UI_METRICS.frame_pad_x,UI_METRICS.checkbox_pad_y)
@@ -1453,21 +2188,13 @@ function UI.checkbox(caption,value)
   ImGui.PopFont(ctx)
   return changed,result
 end
-function UI.column_header_layout(width,add_caption)
-  local aw,ah=UI.button_size(add_caption,true)
-  local mw,mh=UI.button_size('...',true)
-  local h=math.max(ah,mh)
-  local controls_w=aw+UI_METRICS.item_gap_x+mw
-  return {inline=width>=controls_w+UI_METRICS.item_gap_x+UI_METRICS.column_name_min_width,
-    stacked=width<controls_w,width=controls_w,height=h,
-    add_width=aw,menu_width=mw,add_height=ah,menu_height=mh}
-end
-function UI.quick_access_layout(width)
-  local _,side=UI.button_size('',true)
-  local menu_w,menu_h=UI.button_size('...',true)
-  local controls_w=4*side+4*UI_METRICS.item_gap_x+menu_w
-  return {inline=width>=controls_w+UI_METRICS.item_gap_x+UI_METRICS.column_name_min_width,
-    width=controls_w,side=side,menu_width=menu_w,menu_height=menu_h}
+-- The text cell is submitted first: native tables carry the previous cell's
+-- text baseline forward. Drawing the checkbox last keeps its padding baseline
+-- out of the first text line; geometry still places it in the leading column.
+function UI.note_checkbox(value,row)
+  local x=ImGui.GetCursorScreenPos(ctx)
+  ImGui.SetCursorScreenPos(ctx,x,row.top+row.checkbox_y)
+  return UI.checkbox('##checked',value)
 end
 function UI.quick_access_next(row,width)
   if row.used>0 and row.used+UI_METRICS.item_gap_x+width<=row.width then
@@ -1477,7 +2204,7 @@ function UI.quick_access_next(row,width)
 end
 --[[
 Lucide icons: https://github.com/lucide-icons/lucide
-Original paths: type, square-check, list-chevrons-down-up, file-input, palette, trash, x, pencil, check.
+Original paths: type, square-check, list-chevrons-down-up, file-input, palette, trash, x, pencil, check, clock, grip-vertical.
 Rendered with a 1.5 px stroke at 24 px; white alpha masks are tinted by the UI.
 ISC License
 
@@ -1525,6 +2252,65 @@ SOFTWARE.
 
 ]]
 UI.quick_icon_png={
+  grip=
+    '\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\082\000\000\000\096\000\000\000\096\008\006\000\000\000\226\152\119\056\000\000\000\009\112\072\089\115\000\000\059\014\000\000\059'..
+    '\014\001\204\182\161\131\000\000\000\025\116\069\088\116\083\111\102\116\119\097\114\101\000\119\119\119\046\105\110\107\115\099\097\112\101\046\111\114\103\155\238\060\026\000\000\002\092\073'..
+    '\068\065\084\120\156\237\154\177\078\219\080\024\133\079\016\035\202\152\009\049\118\067\093\059\116\067\221\040\083\223\160\079\128\016\079\208\185\015\083\117\172\058\179\181\067\199\128\010'..
+    '\018\083\167\086\048\243\051\216\072\030\066\073\110\254\112\126\228\239\147\238\098\217\039\145\191\027\251\218\057\147\136\016\248\216\114\127\129\177\131\000\051\008\048\131\000\051\008\048'..
+    '\131\000\051\008\048\131\000\051\008\048\131\000\051\008\048\131\000\051\021\004\076\037\125\146\244\083\210\109\063\126\244\219\102\047\032\127\061\034\194\057\014\034\226\042\030\231\095\068'..
+    '\124\040\156\191\246\152\132\239\117\244\129\164\111\146\038\079\236\023\146\222\073\250\094\044\063\005\151\128\169\164\095\146\246\150\220\255\090\210\190\164\191\069\242\211\112\221\003\078'..
+    '\181\252\201\145\164\093\073\199\133\242\211\112\009\120\223\112\204\081\161\252\052\092\151\160\027\073\059\011\182\191\081\119\205\062\123\228\152\105\145\252\052\042\044\067\135\076\180\217'..
+    '\239\180\233\252\149\217\054\125\238\133\164\215\011\182\047\154\153\015\156\023\202\079\195\053\027\190\054\028\243\165\080\126\026\174\123\192\076\210\092\203\095\115\127\171\155\209\055\069'..
+    '\242\211\112\253\002\254\072\250\168\238\033\232\041\238\250\125\087\057\057\155\206\207\195\249\024\030\017\111\035\098\254\159\087\005\151\253\235\132\170\249\047\250\085\196\003\083\073\039'..
+    '\146\014\037\189\082\055\107\231\234\174\227\159\181\254\204\220\116\254\090\084\016\048\106\074\173\137\199\008\002\204\032\192\012\002\204\032\192\012\002\204\032\192\012\002\204\032\192\012'..
+    '\002\204\032\192\012\002\204\032\192\076\005\001\116\067\141\131\110\104\248\254\015\160\027\042\186\161\173\249\105\208\013\109\203\079\131\110\104\091\126\026\116\067\219\242\211\168\176\012'..
+    '\029\066\055\244\153\160\027\218\067\055\180\045\063\013\186\161\109\249\105\208\013\165\027\074\055\212\034\126\000\221\080\240\081\106\077\060\070\016\096\006\001\102\016\096\006\001\102\016'..
+    '\096\006\001\102\016\096\006\001\102\016\096\006\001\102\016\096\006\001\102\042\008\160\027\106\028\116\067\195\247\127\000\221\080\209\013\109\205\079\131\110\104\091\126\026\116\067\219\242'..
+    '\211\160\027\218\150\159\070\133\101\232\016\186\161\207\004\221\208\030\186\161\109\249\105\208\013\109\203\079\131\110\040\221\080\186\161\022\241\003\232\134\130\143\082\107\226\049\130\000'..
+    '\051\008\048\131\000\051\008\048\131\000\051\008\048\131\000\051\008\048\131\000\051\008\048\131\000\051\247\086\104\023\113\117\036\238\203\000\000\000\000\073\069\078\068\174\066\096\130',
+
+  ['clock']=
+    '\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\082\000\000\000\096\000\000\000\096\008\006\000\000\000\226\152\119\056\000\000\008\165\073\068\065\084\120\218\237\157\127\140\093\069\021\199\063\187\210\093\236'..
+    '\047\187\107\065\162\166\148\166\116\091\250\007\041\182\216\214\160\108\045\165\066\160\072\072\037\128\077\012\066\099\080\041\138\241\015\137\137\026\131\196\194\150\106\137\086\099\112\013\008\104\036\042\070\253\195\098'..
+    '\068\237\150\054\248\023\237\118\219\141\117\081\251\195\254\090\022\104\183\063\246\248\199\156\117\215\229\158\123\239\188\247\238\125\243\222\187\223\100\242\146\153\247\222\204\156\239\189\051\103\206\156\057\211\036\034'..
+    '\020\168\030\154\011\017\020\004\020\004\020\040\008\104\088\092\016\112\219\154\128\185\192\021\064\007\048\079\211\012\096\010\208\166\159\000\111\002\039\244\243\036\208\007\236\213\180\007\216\023\108\039\003\211\130\230'..
+    '\002\031\005\058\053\093\092\161\255\061\012\188\168\233\015\064\127\065\192\024\218\129\219\128\117\192\135\114\170\115\055\208\013\252\024\056\212\168\004\172\000\190\000\092\095\197\161\240\028\240\123\224\081\125\059\026'..
+    '\130\128\149\192\215\129\101\129\013\199\127\005\190\005\188\000\072\061\018\240\065\096\011\240\129\192\021\147\157\192\125\250\089\023\004\180\003\015\003\159\046\065\237\029\086\065\236\086\205\166\023\024\152\160\245\048'..
+    '\065\043\154\005\204\087\141\105\033\176\004\104\241\172\119\004\248\062\240\021\173\167\102\009\184\085\059\050\211\115\130\252\037\176\077\135\133\183\202\108\195\100\157\220\087\000\107\128\005\030\191\061\002\220\171\237'..
+    '\201\006\034\146\069\106\021\145\205\146\030\255\017\145\199\069\100\113\070\237\025\159\150\104\219\142\166\108\219\136\136\116\137\072\075\022\237\201\162\131\115\068\100\087\202\206\013\136\200\231\068\228\157\057\008\126'..
+    '\098\154\044\034\159\023\145\215\082\182\245\101\017\153\029\058\001\087\137\200\225\020\157\057\044\034\247\100\245\084\121\166\022\017\089\047\034\071\082\180\251\160\136\044\010\149\128\107\069\100\048\161\003\231\069\164'..
+    '\091\068\102\006\032\248\137\105\134\014\131\231\018\250\048\036\034\171\066\035\224\022\017\057\157\208\240\125\034\114\117\128\130\159\152\150\138\072\127\066\095\078\139\200\154\080\008\232\076\033\252\095\232\019\070\141'..
+    '\164\233\034\242\076\066\159\134\069\228\186\106\019\112\085\194\176\115\078\039\058\106\052\061\160\195\166\133\193\114\231\132\114\214\001\115\128\237\049\022\203\097\224\046\224\231\053\110\178\095\171\134\187\086\163\252'..
+    '\144\154\085\014\228\185\033\211\010\060\023\035\252\033\224\134\012\133\223\002\060\006\028\215\244\088\009\171\221\180\120\014\184\081\251\020\133\075\244\059\045\121\046\196\190\147\048\054\174\202\120\104\232\138\168\183'..
+    '\043\227\058\147\230\186\174\188\230\128\091\019\198\252\219\114\024\155\143\069\212\125\044\135\122\215\198\204\009\035\170\013\102\074\064\123\194\130\037\175\009\215\066\030\117\111\072\088\096\182\249\252\159\239\028\240'..
+    '\048\112\145\081\246\051\096\115\003\236\163\111\002\126\106\148\093\012\124\051\043\107\232\018\160\199\152\184\251\213\206\063\152\147\016\036\102\035\063\015\188\011\120\069\053\193\040\083\246\114\096\071\037\181\160\038'..
+    '\224\009\227\251\035\192\029\057\010\063\004\012\002\119\106\223\163\100\250\120\165\213\208\027\129\197\070\217\247\128\151\105\060\244\000\063\140\217\253\091\093\201\033\232\207\134\199\194\017\221\125\058\145\115\231\171'..
+    '\061\004\141\223\237\235\053\230\197\237\058\020\149\253\006\172\192\118\023\121\168\010\194\015\009\199\129\175\026\101\203\128\107\043\241\006\252\070\087\181\019\241\026\206\145\234\076\021\058\030\202\027\048\106\021\232'..
+    '\007\222\023\081\246\002\112\083\057\111\192\123\128\085\070\217\183\171\036\252\208\048\012\108\052\202\086\171\012\075\038\224\078\162\157\166\142\198\076\064\141\136\173\192\177\136\252\011\128\079\148\067\192\058\035\255'..
+    '\105\224\084\033\247\255\225\045\224\089\163\236\147\165\018\112\057\112\165\081\246\147\066\230\111\067\183\145\191\024\184\172\020\002\086\024\249\123\128\093\133\188\223\134\029\170\146\250\200\050\150\128\078\035\255\249'..
+    '\066\214\038\126\237\041\075\147\128\166\024\029\246\197\066\206\038\182\025\249\043\045\021\217\090\007\204\195\157\046\137\082\185\218\041\223\093\176\158\214\001\227\049\069\023\103\045\198\156\186\063\237\027\048\223\200'..
+    '\223\025\128\240\067\198\155\049\243\227\002\159\033\200\034\224\213\066\198\137\216\109\228\207\243\033\160\195\200\239\043\228\155\136\062\031\153\090\004\204\053\242\247\022\242\077\068\111\204\186\042\053\001\237\070\254'..
+    '\064\033\223\068\012\248\200\212\034\096\154\145\255\122\033\223\068\188\238\035\083\095\002\134\002\239\252\086\096\118\149\219\048\228\035\083\107\029\048\108\232\178\173\132\097\130\142\219\196\056\011\060\131\059\137\185'..
+    '\191\010\109\107\005\078\027\050\189\208\199\020\017\050\142\199\148\077\194\089\032\119\007\242\070\196\194\034\224\013\035\127\106\032\237\238\078\241\157\073\192\061\170\022\230\073\132\215\240\221\092\137\113\172\010\248'..
+    '\050\206\245\227\108\128\068\100\074\192\244\064\008\056\003\108\208\245\202\102\029\095\125\136\232\142\089\235\148\139\233\149\032\192\026\099\047\013\080\231\190\095\151\249\062\068\140\206\017\089\016\113\169\143\076\045'..
+    '\002\246\249\216\051\002\034\098\062\240\003\143\161\105\148\136\077\084\238\124\065\135\143\076\155\061\077\014\029\129\107\071\007\112\039\219\231\121\018\113\063\240\072\198\004\236\173\004\001\011\107\068\077\045\133\136'..
+    '\117\021\170\123\097\037\008\216\099\228\047\193\197\094\160\142\137\040\007\083\177\163\193\244\250\016\176\159\232\072\082\045\228\023\213\042\111\034\186\043\080\207\135\117\072\155\136\131\024\097\210\154\099\150\250\127'..
+    '\052\202\058\169\093\140\039\098\043\206\175\245\004\208\165\107\139\114\097\201\102\155\101\062\137\243\013\189\023\023\106\038\106\120\186\130\002\214\048\019\053\009\223\013\252\200\231\013\000\023\093\048\010\011\116\046'..
+    '\040\240\255\088\026\163\001\089\222\018\177\004\244\003\127\051\202\238\042\228\157\090\139\218\073\204\033\238\036\107\168\053\049\221\081\099\218\080\214\152\130\237\132\027\235\198\153\068\192\211\134\198\048\019\023\003'..
+    '\174\128\195\122\162\183\028\207\225\078\209\151\076\192\017\092\092\205\040\124\137\236\194\003\212\018\046\004\190\104\148\253\022\023\181\183\100\002\192\197\097\136\194\251\129\079\021\242\231\110\224\189\070\217\198\164'..
+    '\031\151\123\072\239\024\206\000\118\180\065\133\223\174\038\134\168\168\144\021\059\164\007\238\132\124\020\222\013\124\163\129\159\254\071\176\067\114\126\045\205\031\164\125\003\154\112\254\239\081\250\255\136\190\029\061'..
+    '\013\038\252\229\192\075\198\067\156\234\233\247\033\000\220\073\143\030\224\029\017\101\003\192\034\226\055\203\235\009\051\112\161\010\046\051\030\200\101\164\060\188\238\227\021\177\011\103\200\138\194\044\224\073\170\239'..
+    '\030\158\007\154\212\172\096\029\059\122\002\159\200\001\158\161\090\218\018\226\130\062\080\195\241\225\210\166\007\099\250\127\200\055\056\097\041\013\088\163\193\137\172\184\160\107\235\088\248\183\039\004\108\186\041\175'..
+    '\168\137\155\018\066\150\093\095\135\194\079\010\089\182\049\207\168\137\045\186\054\176\172\162\067\192\199\099\044\170\181\134\149\184\195\137\150\099\218\014\224\026\074\216\113\043\213\053\241\012\046\156\163\117\255\202'..
+    '\052\092\140\137\181\117\032\252\219\181\047\150\240\015\170\033\174\164\237\206\114\124\067\015\000\031\195\118\199\110\197\133\246\218\080\195\218\206\131\192\083\049\054\175\065\149\193\063\074\174\165\066\065\187\079\037'..
+    '\132\249\125\222\055\152\093\000\161\139\159\077\017\186\120\101\040\193\187\215\164\136\031\221\175\129\177\067\023\254\114\017\249\123\066\095\078\137\200\205\033\134\175\063\153\226\054\138\110\017\185\040\064\193\183\105'..
+    '\248\250\243\041\194\215\095\039\018\230\005\014\139\244\146\131\052\087\150\124\070\175\058\169\182\224\091\069\228\190\148\087\154\252\091\068\174\012\253\010\147\217\122\221\071\026\252\083\003\161\078\174\130\224\167\232'..
+    '\202\253\095\041\219\218\035\034\179\106\225\014\153\209\107\065\054\197\172\152\039\226\168\136\124\055\167\057\098\169\136\108\049\194\031\091\195\230\163\034\050\041\139\246\100\125\141\213\045\056\223\034\159\075\057\251'..
+    '\024\187\198\234\037\198\238\010\043\021\083\117\145\052\122\141\213\229\030\191\061\140\243\143\250\085\102\186\110\014\023\185\181\225\194\249\174\047\097\221\113\086\173\176\175\050\118\061\237\128\174\180\079\050\118\148'..
+    '\106\170\154\136\167\225\252\243\071\175\191\093\168\102\244\073\158\245\158\199\197\067\125\072\235\161\150\009\024\191\159\176\005\184\058\240\005\216\118\224\179\106\239\207\028\121\158\146\220\133\139\040\123\077\160\054'..
+    '\162\191\000\055\235\238\222\043\121\085\090\205\235\108\063\130\115\231\088\093\194\016\081\041\156\005\126\135\243\094\248\083\085\236\029\013\126\161\243\147\036\248\237\052\002\001\227\049\071\181\149\078\253\188\164\066'..
+    '\255\123\080\181\170\209\116\032\024\139\095\096\004\076\196\092\156\055\246\168\086\211\129\139\221\063\077\181\158\081\019\241\027\170\173\140\106\071\125\140\093\127\219\075\117\066\022\212\005\001\117\143\230\066\004\005'..
+    '\001\005\001\005\010\002\026\022\255\005\131\144\096\142\137\240\174\054\000\000\000\000\073\069\078\068\174\066\096\130',
   ['pencil']=
     '\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\082\000\000\000\096\000\000\000\096\008\006\000\000\000\226\152\119\056\000\000\005\100\073\068\065\084\120\218\237\157\079\104\092\069\028\199\063\073\214\054\100'..
     '\163\181\085\170\061\040\021\172\069\188\024\084\154\162\162\086\252\147\054\181\010\166\152\158\237\193\155\007\079\090\090\068\015\034\122\241\040\158\004\173\154\182\098\018\171\081\219\154\038\022\069\072\015\074\043\020'..
@@ -1739,76 +2525,392 @@ function UI.icon_image(kind)
   end
   return image
 end
-function UI.quick_access_button(id,caption,kind,side)
+function UI.timecode_badge(block)
+  local fps,drop_frame=project_timecode_settings()
+  local time,stamp=M.block_time(block,fps,drop_frame)
+  if time==nil then return false,false end
+  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
+  local available=ImGui.GetContentRegionAvail(ctx)
+  ImGui.BeginGroup(ctx)
   local sx,sy=ImGui.GetCursorScreenPos(ctx)
-  local clicked=UI.source_button('quick_'..id,'',side,side)
+  local height=ImGui.GetTextLineHeight(ctx)
+  local side=math.min(UI_METRICS.timecode_icon_size,height)
+  ImGui.Dummy(ctx,side,height)
+  local color=ImGui.GetColor(ctx,ImGui.Col_TextDisabled)
+  local image=UI.icon_image('clock')
+  ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),image,sx,sy+(height-side)*0.5,
+    sx+side,sy+(height+side)*0.5,0,0,1,1,color)
+  local caption=stamp or M.timecode_label(time)
+  local caption_width=ImGui.CalcTextSize(ctx,caption)
+  if available>=side+UI_METRICS.timecode_label_gap+caption_width then
+    ImGui.SameLine(ctx,0,UI_METRICS.timecode_label_gap)
+    ImGui.TextDisabled(ctx,caption)
+  end
+  ImGui.EndGroup(ctx)
+  local hovered=ImGui.IsItemHovered(ctx)
+  ImGui.SetItemTooltip(ctx,tr('Timeline position')..': '..caption..'\n'..tr('Double-click to go to timecode'))
+  ImGui.PopFont(ctx)
+  return hovered,true
+end
+function UI.quick_access_button(id,caption,kind,side,selected,instruction)
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  local clicked=UI.source_button('quick_'..id,'',side,side,selected)
   local image=UI.icon_image(kind)
-  local icon_side=math.min(16,side-7)
+  local icon_side=math.max(0,math.min(UI_METRICS.quick_icon_size,side-UI_METRICS.quick_icon_total_inset))
   local offset=(side-icon_side)*0.5
   local color=ImGui.GetColor(ctx,ImGui.Col_Text)
   ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),image,
     sx+offset,sy+offset,sx+offset+icon_side,sy+offset+icon_side,
     0,0,1,1,color)
-  ImGui.SetItemTooltip(ctx,tr(caption))
+  local hint=tr(caption)
+  local detail=instruction and tr(instruction)
+  if detail and detail~=hint then hint=hint..'\n'..detail end
+  ImGui.SetItemTooltip(ctx,hint)
   return clicked
 end
-function UI.edit_mode_size()
-  local edit_caption=language=='ru' and tr('Edit notes') or 'Edit'
-  local edit_width=UI.button_size(edit_caption,true)
-  local done_width=UI.button_size(tr('Done'),true)
-  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
-  local height=ImGui.GetFrameHeight(ctx)
-  ImGui.PopFont(ctx)
-  local icon_side=math.max(1,math.min(16,height-4))
-  return math.max(edit_width,done_width)+icon_side+UI_METRICS.inner_gap,height,icon_side
+-- Editing belongs to one existing block in one owner/document generation.
+function UI.note_edit_valid(edit)
+  if not (edit and edit.owner==session and edit.epoch==epoch and session
+      and edit.doc==session.doc and not session.error and not session.conflict
+      and not modal and not tab_rename and not UI.info and not bulk_selection
+      and not UI.note_drag and not UI.place and M.visible(edit.block,hide_completed)
+      and startup_layout_frames>=STARTUP_LAYOUT_FRAMES) then return false end
+  local tab,column=M.note_location(session.doc,edit.block)
+  return tab~=nil and tab.id==edit.tab_id and column==edit.column and not tab.folded and not column.folded
 end
-function UI.edit_mode_button(width,height,icon_side)
-  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
-  local sx,sy=ImGui.GetCursorScreenPos(ctx)
-  -- One stable ID and width keep keyboard focus and toolbar positions when
-  -- the caption changes. Use the existing active button color for Edit mode.
-  local clicked=UI.source_button('edit_mode','',width,height,editing)
-  local caption=editing and tr('Done') or (language=='ru' and tr('Edit notes') or 'Edit')
-  local text_width,text_height=ImGui.CalcTextSize(ctx,caption)
-  local start=sx+(width-icon_side-UI_METRICS.inner_gap-text_width)*0.5
-  local color=ImGui.GetColor(ctx,ImGui.Col_Text)
-  local image=UI.icon_image(editing and 'check' or 'pencil')
+function UI.note_editing(block)
+  local edit=UI.note_edit
+  return edit~=nil and edit.block==block
+end
+-- Keep a draft until it is deliberately committed. This makes Esc a real
+-- cancellation, rather than an attempt to undo already serialized keystrokes.
+function UI.end_note_edit(discard)
+  local edit=UI.note_edit
+  UI.note_edit=nil;UI.new_input=nil;UI.note_press=nil
+  UI.end_edit_after_frame=nil;UI.note_outside_press=nil
+  UI.note_cancel_prompt=nil
+  if edit then
+    if not discard and edit.original~=nil and edit.value~=edit.original
+        and edit.owner==session and edit.doc==session.doc
+        and not session.error and not session.conflict
+        and api.valid(session.target) then
+      local tab,column=M.note_location(edit.doc,edit.block)
+      if tab and column==edit.column and tab.id==edit.tab_id then
+        if edit.block.kind=='check' then edit.block.label=edit.value
+        else edit.block.text=edit.value end
+        touch(nil,'edit_note')
+      end
+    end
+    edit.owner.history.key=nil;edit.owner.input_state=nil
+    if edit.owner==session then undo_boundary=true end
+  end
+end
+function UI.activate_note(tab,column,block)
+  UI.end_note_edit()
+  session.active_group_id=column.id
+  local original=(block.kind=='check' and block.label)
+    or ((block.kind=='text' or block.kind=='note') and block.text)
+  local edit={owner=session,doc=session.doc,epoch=epoch,tab_id=tab.id,
+    column=column,block=block,original=original,value=original,focus=true}
+  if not UI.note_edit_valid(edit) then return end
+  UI.note_edit=edit
+end
+function UI.request_note_cancel()
+  local edit=UI.note_edit
+  if not edit or UI.note_cancel_prompt then return end
+  if edit.original==nil or edit.value==edit.original then
+    UI.end_note_edit(true)
+  else
+    UI.note_cancel_prompt={edit=edit,open=true}
+    UI.note_outside_press=nil;UI.end_edit_after_frame=nil
+  end
+end
+function UI.note_edit_update()
+  local edit=UI.note_edit
+  if edit and (not UI.note_edit_valid(edit) or history_request) then
+    UI.end_note_edit();return
+  end
+  if edit and escape_pressed then
+    UI.request_note_cancel();return
+  end
+  if UI.note_cancel_prompt then return end
+  if edit and edit.rect then
+    local x,y=ImGui.GetMousePos(ctx)
+    local r=edit.rect
+    local outside=x<r[1] or x>=r[3] or y<r[2] or y>=r[4]
+    for button=0,1 do
+      if outside and ImGui.IsMouseClicked(ctx,button) then
+        UI.note_outside_press={edit=edit,button=button}
+      end
+    end
+  end
+  local outside_press=UI.note_outside_press
+  if outside_press and outside_press.edit==edit and not ImGui.IsMouseDown(ctx,outside_press.button) then
+    -- The pressed control keeps its geometry until mouse release.
+    UI.end_edit_after_frame=edit;UI.note_outside_press=nil
+  end
+  local press=UI.note_press
+  if press then
+    local x,y=ImGui.GetMousePos(ctx)
+    if (x-press.x)^2+(y-press.y)^2>36 then press.dragged=true end
+    if press.owner~=session or press.epoch~=epoch or UI.note_drag
+        or (not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0)) then UI.note_press=nil end
+  end
+end
+function UI.note_text_click(tab,column,block,hovered)
+  if modal or tab_rename or UI.info or UI.note_drag or bulk_selection
+      or startup_layout_frames<STARTUP_LAYOUT_FRAMES then return end
+  if hovered and ImGui.IsMouseClicked(ctx,0) then
+    local x,y=ImGui.GetMousePos(ctx)
+    UI.note_press={block=block,owner=session,epoch=epoch,x=x,y=y}
+  end
+  local press=UI.note_press
+  if press and press.block==block and ImGui.IsMouseReleased(ctx,0) then
+    UI.note_press=nil
+    if hovered and not press.dragged and press.owner==session and press.epoch==epoch then
+      UI.activate_note(tab,column,block)
+    end
+  end
+end
+-- Keep focus requests until native multiline navigation actually activates.
+function UI.input_focus_valid(request)
+  local edit=UI.note_edit
+  return request~=nil and UI.note_edit_valid(edit) and request.owner==session
+    and request.epoch==epoch and request.tab_id==edit.tab_id and request.column==edit.column
+    and request.key==(edit.block.kind=='check' and 'label:' or 'text:')..edit.block.id
+end
+-- Shared wrapped draft editor: native child scrolling and native text-input/IME
+-- bridge, with source-based cursor/selection/history and visual rows only.
+function UI.wrapped_editor(m,height,id,save_on_enter)
+  local before=m.value
+  local e=m.source_editor
+  if not e or e.text~=m.value then e=M.editor_new(m.value);m.source_editor=e end
+  if m.focus then e.focused=true;e.focus_pending=true;m.focus=nil end
+  local now=reaper.time_precise()
+  e.blink_time=e.blink_time or now
+  local font_size=ImGui.GetFontSize(ctx)
+  if e.font_size~=font_size then e.glyphs={};e.rows=nil;e.font_size=font_size end
+  local tab_text=string.rep(' ',UI_METRICS.editor_tab_spaces)
+  local function measure(char)
+    local w=e.glyphs[char]
+    if w==nil then
+      w=ImGui.CalcTextSize(ctx,char=='\t' and tab_text or char)
+      w=math.max(0,w);e.glyphs[char]=w
+    end
+    return w
+  end
+  local pad_x,pad_y=ImGui.GetStyleVar(ctx,ImGui.StyleVar_FramePadding)
+  local background=ImGui.GetStyleColor(ctx,ImGui.Col_FrameBg)
+  ImGui.PushStyleColor(ctx,ImGui.Col_ChildBg,background)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,pad_x+UI_METRICS.editor_extra_pad_x,pad_y+UI_METRICS.editor_extra_pad_y)
+  local visible=ImGui.BeginChild(ctx,id or 'import_source_wrapped',0,height,ImGui.ChildFlags_Borders)
+  ImGui.PopStyleVar(ctx);ImGui.PopStyleColor(ctx)
+  if not visible then return false,m.value end
+  local origin_x,origin_y=ImGui.GetCursorScreenPos(ctx)
+  local window_x,window_y=ImGui.GetWindowPos(ctx)
+  local window_w,window_h=ImGui.GetWindowSize(ctx)
+  local scrollbar=ImGui.GetStyleVar(ctx,ImGui.StyleVar_ScrollbarSize)
+  -- Reserve scrollbar width even before it appears, avoiding a reflow cycle.
+  local wrap_width=math.max(1,window_w-2*(pad_x+UI_METRICS.editor_extra_pad_x)-scrollbar-UI_METRICS.editor_wrap_right_inset)
+  local line_h=ImGui.GetTextLineHeight(ctx)
+  local scroll=ImGui.GetScrollY(ctx)
+  local view_h=math.max(1,window_h-2*(pad_y+UI_METRICS.editor_extra_pad_y))
+  local view_top=origin_y+scroll
+  local function layout()
+    if not e.rows or e.wrap_width~=wrap_width then
+      e.rows=M.editor_rows(e.text,wrap_width,measure);e.wrap_width=wrap_width
+    end
+    return e.rows
+  end
+  local reflowed=not e.rows or e.wrap_width~=wrap_width
+  local rows=layout()
+  local mx,my=ImGui.GetMousePos(ctx)
+  local hovered=ImGui.IsWindowHovered(ctx)
+  local over_text=hovered and mx>=origin_x and mx<origin_x+wrap_width
+    and my>=view_top and my<view_top+view_h
+  if over_text then ImGui.SetMouseCursor(ctx,ImGui.MouseCursor_TextInput) end
+  local mods=ImGui.GetKeyMods(ctx)
+  local shift=(mods&ImGui.Mod_Shift)~=0
+  local primary=(mods&ImGui.Mod_Ctrl)~=0 and (mods&ImGui.Mod_Alt)==0
+  local os=reaper.GetOS()
+  local mac=os:match('OSX') or os:match('macOS')
+  local word=(mods&ImGui.Mod_Alt)~=0 or (primary and not mac)
+  local function hit()
+    local row=math.max(1,math.min(#rows,math.floor((my-origin_y)/line_h)+1))
+    local pos=M.editor_hit(e.text,rows[row],mx-origin_x,measure)
+    return pos,pos==rows[row].last and not rows[row].hard
+  end
+  local follow=e.focused and reflowed
+  if ImGui.IsMouseClicked(ctx,0) then
+    if over_text then
+      local pos,upstream=hit()
+      M.editor_move(e,pos,shift,upstream)
+      if ImGui.IsMouseDoubleClicked(ctx,0) then
+        local first=M.editor_word(e.text,pos,-1)
+        local last=M.editor_word(e.text,first,1)
+        while last>first and e.text:sub(M.editor_prev(e.text,last)+1,last):match('^%s+$') do last=M.editor_prev(e.text,last) end
+        e.anchor=first;e.cursor=last
+      end
+      e.focused=true;e.focus_pending=true;e.dragging=true;follow=true
+    elseif not hovered then
+      e.focused=false;e.focus_pending=false;e.dragging=nil
+    end
+  end
+  if e.dragging then
+    if ImGui.IsMouseDown(ctx,0) then
+      if not ImGui.IsMouseClicked(ctx,0) then
+        local pos,upstream=hit();M.editor_move(e,pos,true,upstream);follow=true
+      end
+    else e.dragging=nil end
+  end
+  -- Read committed characters before native InputText consumes its queue.
+  -- The bridge rejects them from its empty buffer; the draft stores them once.
+  local characters={}
+  local index=0
+  while true do
+    local ok,codepoint=ImGui.GetInputQueueCharacter(ctx,index)
+    if not ok then break end
+    if codepoint>=32 and codepoint~=127 and codepoint<=0x10FFFF
+        and not (codepoint>=0xD800 and codepoint<=0xDFFF) then
+      characters[#characters+1]=utf8.char(codepoint)
+    end
+    index=index+1
+  end
+  local selected_first,selected_last=M.editor_range(e)
+  local preserve_clipboard
+  if e.focused and primary and selected_first==selected_last
+      and (ImGui.IsKeyPressed(ctx,ImGui.Key_C,false) or ImGui.IsKeyPressed(ctx,ImGui.Key_X,false)) then
+    preserve_clipboard=ImGui.GetClipboardText(ctx)
+  end
+  local cursor_row=M.editor_row(e,rows)
+  local caret_x=M.editor_x(e.text,rows[cursor_row],e.cursor,measure)
+  local input_x=origin_x+math.max(0,math.min(wrap_width-1,caret_x))
+  local input_y=math.max(view_top,math.min(view_top+math.max(0,view_h-line_h),origin_y+(cursor_row-1)*line_h))
+  ImGui.SetCursorScreenPos(ctx,input_x,input_y)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,0,0)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FrameBorderSize,0)
+  for _,color in ipairs({ImGui.Col_FrameBg,ImGui.Col_FrameBgHovered,ImGui.Col_FrameBgActive,
+      ImGui.Col_Border,ImGui.Col_Text,ImGui.Col_TextSelectedBg,ImGui.Col_InputTextCursor,ImGui.Col_NavCursor}) do
+    ImGui.PushStyleColor(ctx,color,0x00000000)
+  end
+  if e.focused and (e.focus_pending or not e.bridge_active) and not ImGui.IsMouseDown(ctx,0) then
+    ImGui.SetKeyboardFocusHere(ctx)
+  end
+  if not UI.import_capture then
+    -- Completion owns an unmodified Tab key; CharFilter keeps the bridge empty.
+    -- Committed text, clipboard operations and selection belong to the draft.
+    UI.import_capture=ImGui.CreateFunctionFromEEL('EventChar=0;')
+    ImGui.Attach(ctx,UI.import_capture)
+  end
+  local keep_active=ImGui.GetConfigVar(ctx,ImGui.ConfigVar_InputTextEnterKeepActive)
+  ImGui.SetConfigVar(ctx,ImGui.ConfigVar_InputTextEnterKeepActive,1)
+  ImGui.SetNextItemWidth(ctx,1)
+  ImGui.InputText(ctx,'##import_text','',ImGui.InputTextFlags_NoUndoRedo|
+    ImGui.InputTextFlags_CallbackCharFilter|ImGui.InputTextFlags_CallbackCompletion,UI.import_capture)
+  ImGui.SetConfigVar(ctx,ImGui.ConfigVar_InputTextEnterKeepActive,keep_active)
+  if preserve_clipboard~=nil then ImGui.SetClipboardText(ctx,preserve_clipboard) end
+  e.bridge_active=ImGui.IsItemActive(ctx)
+  if e.bridge_active then e.focused=true;e.focus_pending=false end
+  ImGui.PopStyleColor(ctx,8);ImGui.PopStyleVar(ctx,2)
+  local function pressed(key,repeat_key)return ImGui.IsKeyPressed(ctx,key,repeat_key or false)end
+  local function move(pos,upstream)
+    M.editor_move(e,pos,shift,upstream);follow=true
+  end
+  local function replace(value,gesture,first,last)
+    if M.editor_replace(e,value,now,gesture,first,last) then follow=true end
+  end
+  if e.focused and not UI.note_cancel_prompt
+      and ImGui.IsWindowFocused(ctx,ImGui.FocusedFlags_RootAndChildWindows) then
+    local first,last=M.editor_range(e)
+    local command=false
+    if primary then
+      if pressed(ImGui.Key_A) then e.anchor=0;e.cursor=#e.text;e.history.key=nil;follow=true;command=true
+      elseif pressed(ImGui.Key_C) then
+        if first~=last then ImGui.SetClipboardText(ctx,e.text:sub(first+1,last)) end
+        command=true
+      elseif pressed(ImGui.Key_X) then
+        if first~=last then ImGui.SetClipboardText(ctx,e.text:sub(first+1,last));replace('','cut') end
+        command=true
+      elseif pressed(ImGui.Key_V) then replace(ImGui.GetClipboardText(ctx),'paste');command=true
+      elseif pressed(ImGui.Key_Z) then follow=M.editor_history(e,shift and 1 or -1) or follow;command=true
+      elseif pressed(ImGui.Key_Y) then follow=M.editor_history(e,1) or follow;command=true end
+    end
+    if not command then
+      if pressed(ImGui.Key_LeftArrow,true) then
+        move(primary and mac and rows[M.editor_row(e,rows)].first or not shift and first~=last and first or word and M.editor_word(e.text,e.cursor,-1) or M.editor_prev(e.text,e.cursor))
+      elseif pressed(ImGui.Key_RightArrow,true) then
+        move(primary and mac and rows[M.editor_row(e,rows)].last or not shift and first~=last and last or word and M.editor_word(e.text,e.cursor,1) or M.editor_next(e.text,e.cursor),primary and mac)
+      elseif pressed(ImGui.Key_UpArrow,true) or pressed(ImGui.Key_DownArrow,true)
+          or pressed(ImGui.Key_PageUp,true) or pressed(ImGui.Key_PageDown,true) then
+        local delta=pressed(ImGui.Key_UpArrow,true) and -1 or pressed(ImGui.Key_DownArrow,true) and 1
+          or (pressed(ImGui.Key_PageUp,true) and -1 or 1)*math.max(1,math.floor(view_h/line_h)-1)
+        if primary and mac then move(delta<0 and 0 or #e.text)
+        else
+          local pos,x,upstream=M.editor_vertical(e,rows,delta,measure)
+          move(pos,upstream);e.preferred_x=x
+        end
+      elseif pressed(ImGui.Key_Home,true) then move(primary and 0 or rows[M.editor_row(e,rows)].first)
+      elseif pressed(ImGui.Key_End,true) then
+        local row=rows[M.editor_row(e,rows)];move(primary and #e.text or row.last,not primary and not row.hard)
+      elseif pressed(ImGui.Key_Backspace,true) then
+        if first==last then first=primary and mac and rows[M.editor_row(e,rows)].first or word and M.editor_word(e.text,first,-1) or M.editor_prev(e.text,first) end
+        replace('',nil,first,last)
+      elseif pressed(ImGui.Key_Delete,true) then
+        if first==last then last=word and M.editor_word(e.text,last,1) or M.editor_next(e.text,last) end
+        replace('',nil,first,last)
+      elseif pressed(ImGui.Key_Enter,true) or pressed(ImGui.Key_KeypadEnter,true) then
+        if save_on_enter and not shift then m.commit_requested=true
+        else replace('\n') end
+      elseif pressed(ImGui.Key_Tab,true) then
+        if shift then e.focused=false;e.focus_pending=false else replace('\t') end
+      end
+      if #characters>0 and not primary then replace(table.concat(characters)) end
+    end
+  end
+  -- Keep recovery data current even if a later drawing call fails.
+  m.value=e.text
+  rows=layout();cursor_row=M.editor_row(e,rows)
+  if follow then
+    e.blink_time=now
+    local top=(cursor_row-1)*line_h
+    if top<scroll then ImGui.SetScrollY(ctx,top)
+    elseif top+line_h>scroll+view_h then ImGui.SetScrollY(ctx,top+line_h-view_h) end
+  end
   local draw_list=ImGui.GetWindowDrawList(ctx)
-  local icon_y=sy+(height-icon_side)*0.5
-  ImGui.DrawList_AddImage(draw_list,image,start,icon_y,start+icon_side,icon_y+icon_side,0,0,1,1,color)
-  ImGui.DrawList_AddText(draw_list,start+icon_side+UI_METRICS.inner_gap,sy+(height-text_height)*0.5,color,caption)
-  ImGui.PopFont(ctx)
-  return clicked
-end
-function UI.document_input(key,caption,value,multiline,height)
-  ImGui.Function_SetValue(input_callback,'seen',0)
-  local flags=ImGui.InputTextFlags_NoUndoRedo|ImGui.InputTextFlags_CallbackAlways
-  local rv,result
-  if multiline then
-    rv,result=ImGui.InputTextMultiline(ctx,caption,value,-1,height,flags|ImGui.InputTextFlags_AllowTabInput,input_callback)
-  else rv,result=ImGui.InputText(ctx,caption,value,flags,input_callback) end
-  if ImGui.Function_GetValue(input_callback,'seen')~=0 then
-    local current={key=key,cursor=ImGui.Function_GetValue(input_callback,'cursor'),
-      first=ImGui.Function_GetValue(input_callback,'first'),last=ImGui.Function_GetValue(input_callback,'last')}
-    local previous=session.input_state
-    local gesture
-    if ImGui.IsKeyChordPressed(ctx,ImGui.Mod_Ctrl|ImGui.Key_V) or
-        ImGui.IsKeyChordPressed(ctx,ImGui.Mod_Shift|ImGui.Key_Insert) then gesture='paste'
-    elseif ImGui.IsKeyChordPressed(ctx,ImGui.Mod_Ctrl|ImGui.Key_X) then gesture='cut' end
-    local group,action=M.text_edit(session.history,key,value,result,previous,current,gesture)
-    if rv and value~=result then touch(group,action) end
-    session.input_state=current
-  elseif rv and value~=result then
-    -- A committed edit may be reported on the deactivation frame without a callback.
-    local group,action=M.text_edit(session.history,key,value,result,session.input_state,nil)
-    touch(group,action)
+  local text_color=ImGui.GetColor(ctx,ImGui.Col_Text)
+  local selection_color=ImGui.GetColor(ctx,ImGui.Col_TextSelectedBg)
+  local first,last=M.editor_range(e)
+  local start_row=math.max(1,math.floor(scroll/line_h)+1)
+  local end_row=math.min(#rows,math.ceil((scroll+view_h)/line_h)+1)
+  for i=start_row,end_row do
+    local row=rows[i]
+    local y=origin_y+(i-1)*line_h
+    if e.focused and first~=last and last>row.first and first<=row.last then
+      local x1=M.editor_x(e.text,row,math.max(first,row.first),measure)
+      local x2=M.editor_x(e.text,row,math.min(last,row.last),measure)
+      if row.hard and last>row.last then x2=x2+math.max(UI_METRICS.editor_newline_selection_min_width,measure(' ')) end
+      x1=math.min(wrap_width,x1);x2=math.min(wrap_width,x2)
+      if x2>x1 then ImGui.DrawList_AddRectFilled(draw_list,origin_x+x1,y,origin_x+x2,y+line_h,selection_color) end
+    end
+    local rendered=e.text:sub(row.first+1,row.last):gsub('\t',tab_text)
+    ImGui.DrawList_AddText(draw_list,origin_x,y,text_color,rendered)
   end
-  if ImGui.IsItemDeactivatedAfterEdit(ctx) then
-    undo_boundary=true
-    if session.input_state and session.input_state.key==key then session.input_state=nil end
+  if e.focused and (now-(e.blink_time or now))%UI_METRICS.editor_caret_period<UI_METRICS.editor_caret_visible_time then
+    local x=math.min(wrap_width,M.editor_x(e.text,rows[cursor_row],e.cursor,measure))
+    local y=origin_y+(cursor_row-1)*line_h
+    ImGui.DrawList_AddLine(draw_list,origin_x+x,y,origin_x+x,y+line_h,text_color,UI_METRICS.editor_caret_thickness)
   end
-  return rv,result
+  -- The complete content extent is registered with a real item after restoring
+  -- the cursor. This also registers blank lines below the last visible glyph.
+  ImGui.SetCursorScreenPos(ctx,origin_x,origin_y)
+  ImGui.Dummy(ctx,0,math.max(line_h,#rows*line_h))
+  ImGui.EndChild(ctx)
+  return e.text~=before,e.text
 end
+function UI.import_source(m,height)
+  return UI.wrapped_editor(m,height,'import_source_wrapped',false)
+end
+
 function UI.confirm_geometry(title,message)
   local delete_w,delete_h=UI.button_size(tr('Delete'))
   local cancel_w,cancel_h=UI.button_size(tr('Cancel'))
@@ -1816,8 +2918,9 @@ function UI.confirm_geometry(title,message)
     ImGui.CalcTextSize(ctx,tr(message)),delete_w+UI_METRICS.item_gap_x+cancel_w)
   local width=math.ceil(math.max(UI_METRICS.confirm_min_width,
     math.min(UI_METRICS.confirm_max_width,content_w+2*UI_METRICS.window_pad_x)))
+  width=math.max(width,delete_w+cancel_w+UI_METRICS.item_gap_x+2*UI_METRICS.window_pad_x)
   local _,title_h=ImGui.CalcTextSize(ctx,tr(title))
-  local _,message_h=ImGui.CalcTextSize(ctx,tr(message),nil,nil,false,width-2*UI_METRICS.window_pad_x)
+  local _,message_h=ImGui.CalcTextSize(ctx,tr(message),nil,nil,false,math.max(1,width-2*UI_METRICS.window_pad_x))
   local height=math.ceil(2*UI_METRICS.window_pad_y+title_h+1+message_h+
     math.max(delete_h,cancel_h)+3*UI_METRICS.item_gap_y)
   return width,height
@@ -1828,34 +2931,13 @@ function UI.name_geometry(title)
   local width=math.max(UI_METRICS.popup_sizes.name[1],
     ImGui.CalcTextSize(ctx,tr(title))+2*UI_METRICS.window_pad_x,
     apply_w+cancel_w+UI_METRICS.item_gap_x+2*UI_METRICS.window_pad_x)
-  local height=2*UI_METRICS.window_pad_y+ImGui.GetTextLineHeight(ctx)+1+
-    ImGui.GetFrameHeight(ctx)+button_h+4*UI_METRICS.item_gap_y
+  local height=math.max(UI_METRICS.popup_sizes.name[2],
+    2*UI_METRICS.window_pad_y+ImGui.GetTextLineHeight(ctx)+1+
+    ImGui.GetFrameHeight(ctx)+button_h+4*UI_METRICS.item_gap_y)
   return math.ceil(width),math.ceil(height)
 end
 -- Keep native selection, overflow scrolling and keyboard navigation. Suppress
 -- only the tab header's mouse-down action; never disable its document contents.
-function UI.release_tab_item(caption,id,flags)
-  local held=ImGui.IsMouseDown(ctx,0) or ImGui.IsMouseDown(ctx,1)
-  local block_mouse=held or ImGui.IsMouseReleased(ctx,1)
-  if block_mouse then
-    ImGui.PushStyleVar(ctx,ImGui.StyleVar_DisabledAlpha,1)
-    ImGui.BeginDisabled(ctx,true)
-  end
-  local visible=ImGui.BeginTabItem(ctx,caption,nil,flags)
-  local hovered=ImGui.IsItemHovered(ctx,block_mouse and ImGui.HoveredFlags_AllowWhenDisabled or 0)
-  if block_mouse then ImGui.EndDisabled(ctx);ImGui.PopStyleVar(ctx) end
-  if startup_layout_frames>=STARTUP_LAYOUT_FRAMES then
-    if hovered and ImGui.IsMouseClicked(ctx,0) then
-      UI.tab_press={id=id,owner=session,epoch=epoch}
-    end
-    local press=UI.tab_press
-    if ImGui.IsMouseReleased(ctx,0) and press and press.id==id then
-      UI.tab_press=nil
-      if hovered and press.owner==session and press.epoch==epoch then force_tab=id end
-    end
-  end
-  return visible,hovered
-end
 -- Recognize a double-click on press; perform its action on the second release.
 function UI.double_click_released(key,hovered)
   -- ReaImGui 0.10 does not expose ImGui.GetID. Use a stable UI-local key.
@@ -1869,6 +2951,16 @@ function UI.double_click_released(key,hovered)
     return hovered and press.owner==session and press.epoch==epoch
   end
   return false
+end
+function UI.seek_note(b,hovered)
+  if bulk_selection or UI.note_drag or startup_layout_frames<STARTUP_LAYOUT_FRAMES then return end
+  local fps,drop_frame=project_timecode_settings()
+  if UI.double_click_released('timecode_'..b.id,hovered and M.block_time(b,fps,drop_frame)~=nil)
+      and session and session.target and api.valid(session.target) then
+    local offset=reaper.GetProjectTimeOffset(session.proj,false)
+    local position=M.seek_position(b,offset,fps,drop_frame)
+    if position~=nil then reaper.SetEditCurPos2(session.proj,position,true,false) end
+  end
 end
 -- Native modal dimming with outside-click cancellation. Check nested popups
 -- before rendering them, so selecting an option outside the modal is safe.
@@ -1909,8 +3001,26 @@ function UI.toolbar_right(row,width)
   end
   row.used=row.width
 end
--- All authored dialogs use the Viewer's 12px outer margin and centering.
+-- Authored dialogs use the configured outer margin and centering.
 -- Content edits never resize a dialog; only a resized host can constrain it.
+function UI.popup_dimensions(kind)
+  local m=UI_METRICS
+  local dimensions=m.popup_sizes[kind] or m.popup_sizes.name
+  local width,height=table.unpack(dimensions)
+  local primary=kind=='note_cancel' and 'Discard changes' or kind=='import' and 'Import' or kind=='restore' and 'Restore' or 'Apply'
+  local button_w,button_h=UI.button_size(tr(primary))
+  local cancel_w,cancel_h=UI.button_size(tr(kind=='note_cancel' and 'Continue editing' or 'Cancel'))
+  button_h=math.max(button_h,cancel_h)
+  local content_h=0
+  if kind=='import' then
+    content_h=m.import_pane_min_height
+  elseif kind=='select' then content_h=m.options_panel_min_height
+  end
+  width=math.max(width,button_w+cancel_w+m.item_gap_x+2*m.window_pad_x)
+  height=math.max(height,2*m.window_pad_y+ImGui.GetTextLineHeight(ctx)+1+
+    2*m.item_gap_y+button_h+m.popup_footer_gap+content_h)
+  return width,height
+end
 function UI.place_popup(width,height)
   local x,y=ImGui.GetWindowPos(ctx)
   local ww,wh=ImGui.GetWindowSize(ctx)
@@ -1921,6 +3031,16 @@ function UI.place_popup(width,height)
   ImGui.SetNextWindowSize(ctx,width,height,ImGui.Cond_Always)
   ImGui.SetNextWindowSizeConstraints(ctx,width,height,width,height)
   return width,height
+end
+-- Called only from the stable root window scope. A false BeginPopupModal
+-- can mean clipped, not closed: keep ownership and retry on a visible frame.
+function UI.close_modal_if_open(title)
+  if not ImGui.IsPopupOpen(ctx,title) then return true end
+  if ImGui.BeginPopupModal(ctx,title,nil,
+      ImGui.WindowFlags_NoTitleBar|ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings) then
+    ImGui.CloseCurrentPopup(ctx);ImGui.EndPopup(ctx);return true
+  end
+  return false
 end
 function UI.popup_body(id,button_caption)
   local _,button_h=UI.button_size(button_caption)
@@ -1941,14 +3061,21 @@ function UI.read_text(text,owner,max_width)
       lines=M.wrap_read(text,width,function(value)return ImGui.CalcTextSize(ctx,value)end)}
     UI.read_cache[owner]=cache
   end
+  -- Measure the first rendered line, including native table/baseline offsets.
+  local first_line_center
   -- BeginGroup keeps every wrapped line aligned after a leading checkbox.
   ImGui.BeginGroup(ctx)
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,0,UI_METRICS.read_line_gap)
   for _,line in ipairs(cache.lines) do
     if line=='' then ImGui.Dummy(ctx,0,line_h) else ImGui.Text(ctx,line) end
+    if not first_line_center then
+      local _,line_top=ImGui.GetItemRectMin(ctx)
+      first_line_center=line_top+line_h*0.5
+    end
   end
   ImGui.PopStyleVar(ctx)
   ImGui.EndGroup(ctx)
+  return first_line_center
 end
 function UI.owner_title(target)
   return api.title(target,tr)
@@ -1962,10 +3089,10 @@ end
 
       function UI.trigger(label, menu_id, popup_id, enabled)
         local label_w, label_h = ImGui.CalcTextSize(ctx, label)
-        local trigger_pad_x = 8
+        local trigger_pad_x = UI_METRICS.menu_trigger_pad_x
         local trigger_w = label_w + trigger_pad_x * 2
         local trigger_h = ImGui.GetFrameHeight(ctx)
-        if trigger_h < 1 then trigger_h = 38 end
+        if trigger_h < 1 then trigger_h = UI_METRICS.menu_bar_height end
 
         local trigger_clicked = ImGui.InvisibleButton(
           ctx,
@@ -2026,8 +3153,8 @@ end
 
         ImGui.DrawList_AddText(
           dl,
-          tx1 + math.max(6, math.floor(((tx2 - tx1) - label_w) * 0.5)),
-          ty1 + math.max(1, math.floor(((ty2 - ty1) - label_h) * 0.5)),
+          tx1 + math.max(UI_METRICS.menu_label_min_inset_x, math.floor(((tx2 - tx1) - label_w) * 0.5)),
+          ty1 + math.max(UI_METRICS.menu_label_min_inset_y, math.floor(((ty2 - ty1) - label_h) * 0.5)),
           UI.color(ImGui.Col_Text),
           label
         )
@@ -2048,7 +3175,7 @@ function UI.begin_menu(key,enabled)
   if UI.menu_count>0 then ImGui.SameLine(ctx,0,0) end
   UI.menu_count=UI.menu_count+1
   ImGui.BeginDisabled(ctx,enabled==false)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,4,math.max(0,(38-ImGui.GetTextLineHeight(ctx))*0.5))
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,UI_METRICS.menu_bar_pad_x,math.max(0,(UI_METRICS.menu_bar_height-ImGui.GetTextLineHeight(ctx))*0.5))
   local t=UI.trigger(tr(key),key,'##top_'..key,enabled)
   ImGui.PopStyleVar(ctx)
   ImGui.EndDisabled(ctx)
@@ -2084,8 +3211,8 @@ function UI.open_url(url)
 end
 function UI.show_info(kind) UI.info=kind; UI.open_info=true end
 function UI.about_geometry()
-  local pad_x,pad_y=20,17
-  local texts={TITLE,tr('Version: ')..'0.5.11',
+  local pad_x,pad_y=UI_METRICS.about_pad_x,UI_METRICS.about_pad_y
+  local texts={TITLE,tr('Version: ')..VERSION,
     tr('Notes for projects, tracks and items.'),tr('Aleksei Vorobev / Patch34'),
     'https://github.com/patch-34'}
   local content_w=UI.button_size(tr('Close'))
@@ -2094,7 +3221,8 @@ function UI.about_geometry()
     content_w=math.max(content_w,text_w)
   end
   local host_w=ImGui.GetWindowSize(ctx)
-  local width=math.min(math.ceil(content_w+2*pad_x+2),
+  local width=math.min(math.max(UI_METRICS.popup_sizes.about[1],
+    math.ceil(content_w+2*pad_x+UI_METRICS.about_geometry_extra)),
     math.max(1,host_w-2*UI_METRICS.popup_margin))
   local content_h=0
   for i,text in ipairs(texts) do
@@ -2104,26 +3232,27 @@ function UI.about_geometry()
   end
   local _,button_h=UI.button_size(tr('Close'))
   -- Four inter-line gaps plus the two explicit Spacing items in About.
-  local height=math.ceil(2*pad_y+content_h+6*UI_METRICS.item_gap_y+
-    button_h+UI_METRICS.popup_footer_gap+2)
+  local height=math.max(UI_METRICS.popup_sizes.about[2],math.ceil(2*pad_y+content_h+6*UI_METRICS.item_gap_y+
+    button_h+UI_METRICS.popup_footer_gap+UI_METRICS.about_geometry_extra))
   return width,height
 end
 function UI.info_window()
   if not UI.info then return end
   local kind=UI.info
   if UI.open_info then ImGui.OpenPopup(ctx,'##information');UI.open_info=nil end
-  local w,h=table.unpack(UI_METRICS.popup_sizes[kind])
-  if kind=='about' then w,h=UI.about_geometry() end
+  local w,h
+  if kind=='about' then w,h=UI.about_geometry()
+  else w,h=table.unpack(UI_METRICS.popup_sizes[kind]) end
   -- About panel colors, corner radius and inset are from Viewer render_about_overlay.
-  ImGui.PushStyleColor(ctx,ImGui.Col_PopupBg,rgba(80,80,80,218))
-  ImGui.PushStyleColor(ctx,ImGui.Col_Border,rgba(220,220,220,95))
-  ImGui.PushStyleColor(ctx,ImGui.Col_Text,rgba(245,245,245))
-  ImGui.PushStyleColor(ctx,ImGui.Col_TextDisabled,rgba(210,210,210))
-  ImGui.PushStyleColor(ctx,ImGui.Col_Button,rgba(105,105,105,230))
-  ImGui.PushStyleColor(ctx,ImGui.Col_ButtonHovered,rgba(122,122,122,235))
+  ImGui.PushStyleColor(ctx,ImGui.Col_PopupBg,UI_PALETTE.about.background)
+  ImGui.PushStyleColor(ctx,ImGui.Col_Border,UI_PALETTE.about.border)
+  ImGui.PushStyleColor(ctx,ImGui.Col_Text,UI_PALETTE.about.text)
+  ImGui.PushStyleColor(ctx,ImGui.Col_TextDisabled,UI_PALETTE.about.dim)
+  ImGui.PushStyleColor(ctx,ImGui.Col_Button,UI_PALETTE.about.button)
+  ImGui.PushStyleColor(ctx,ImGui.Col_ButtonHovered,UI_PALETTE.about.button_hover)
   ImGui.PushStyleColor(ctx,ImGui.Col_ChildBg,0)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_PopupRounding,12)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,20,17)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_PopupRounding,UI_METRICS.about_rounding)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,UI_METRICS.about_pad_x,UI_METRICS.about_pad_y)
   UI.place_popup(w,h)
   local visible=ImGui.BeginPopup(ctx,'##information',ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings)
   if visible then
@@ -2134,7 +3263,7 @@ function UI.info_window()
     if UI.popup_body('information_body',tr('Close')) then
       if kind=='about' then
         ImGui.Text(ctx,TITLE)
-        ImGui.TextDisabled(ctx,tr('Version: ')..'0.5.11')
+        ImGui.TextDisabled(ctx,tr('Version: ')..VERSION)
         ImGui.Spacing(ctx)
         ImGui.TextWrapped(ctx,tr('Notes for projects, tracks and items.'))
         ImGui.Text(ctx,tr('Aleksei Vorobev / Patch34'))
@@ -2151,8 +3280,8 @@ function UI.info_window()
     local close_x,close_y=ImGui.GetCursorScreenPos(ctx)
     local available_w=ImGui.GetContentRegionAvail(ctx)
     ImGui.SetCursorScreenPos(ctx,close_x+math.max(0,available_w-close_w),close_y)
-    ImGui.PushStyleVar(ctx,ImGui.StyleVar_FrameRounding,7)
-    ImGui.PushStyleColor(ctx,ImGui.Col_Border,rgba(230,230,230,80))
+    ImGui.PushStyleVar(ctx,ImGui.StyleVar_FrameRounding,UI_METRICS.about_button_rounding)
+    ImGui.PushStyleColor(ctx,ImGui.Col_Border,UI_PALETTE.about.button_border)
     if ImGui.Button(ctx,ui_label('Close'),close_w,close_h) then ImGui.CloseCurrentPopup(ctx);UI.info=nil end
     ImGui.PopStyleColor(ctx);ImGui.PopStyleVar(ctx)
     ImGui.EndPopup(ctx)
@@ -2161,6 +3290,15 @@ function UI.info_window()
 end
 
 local function active_tab() return session.doc.tabs[session.active] end
+function UI.current_group()
+  local board=active_tab()
+  if not board then return nil end
+  for _,column in ipairs(board.columns) do
+    if column.id==session.active_group_id then return column end
+  end
+  for _,column in ipairs(board.columns) do if not column.folded then return column end end
+  return board.columns[1]
+end
 local function add_block(kind,column)
   local b
   if kind=='text' then b=M.text('')
@@ -2168,29 +3306,292 @@ local function add_block(kind,column)
   else b={id=uid(),kind='select',label=tr('Status'),options={tr('Not started'),tr('In progress'),tr('Done')},selected=1} end
   column=column or active_tab().columns[1]
   column.blocks[#column.blocks+1]=b
-  editing=true; pref('editing','1'); touch(nil,kind=='select' and 'add_dropdown' or 'add_note')
-  if kind=='select' then request_modal(clone_select(b)) end
+  session.active_group_id=column.id
+  touch(nil,kind=='select' and 'add_dropdown' or 'add_note')
+  column.folded=false
+  bulk_selection=nil
+  local board,board_index=M.note_column(session.doc,column)
+  session.active=board_index
+  if kind=='select' then request_modal(clone_select(b))
+  else UI.activate_note(board,column,b) end
 end
 local function import_dialog(column)
-  request_modal({kind='import',title='Import text',value='',strip=true,preview={},column=column or active_tab().columns[1]})
+  column=column or UI.current_group()
+  session.active_group_id=column.id
+  request_modal({kind='import',title='Import text',value='',strip=true,timecodes=false,preview={},column=column})
+end
+local function refresh_import_preview(m)
+  local fps,drop_frame=project_timecode_settings()
+  m.preview=M.import_text(m.value,m.strip,m.timecodes,fps,drop_frame)
+end
+local function add_from_menu(kind,column)
+  column=column or UI.current_group()
+  if not column or not M.note_column(session.doc,column) then return end
+  UI.end_note_edit()
+  UI.place=nil;UI.place_cancelled=true;UI.note_drag=nil;bulk_selection=nil
+  if kind=='import' then import_dialog(column)
+  else
+    add_block(kind,column)
+    column.reveal_note_id=column.blocks[#column.blocks].id
+  end
 end
 local function add_menu(column)
-  if ImGui.MenuItem(ctx,ui_label('Note with checkbox')) then add_block('note',column) end
-  if ImGui.MenuItem(ctx,ui_label('Import text...')) then import_dialog(column) end
-  if ImGui.MenuItem(ctx,ui_label('Text')) then add_block('text',column) end
-  if ImGui.MenuItem(ctx,ui_label('Dropdown')) then add_block('select',column) end
+  if ImGui.MenuItem(ctx,ui_label('Note with checkbox')) then add_from_menu('note',column) end
+  if ImGui.MenuItem(ctx,ui_label('Import text...')) then add_from_menu('import',column) end
+  if ImGui.MenuItem(ctx,ui_label('Text')) then add_from_menu('text',column) end
+  if ImGui.MenuItem(ctx,ui_label('Dropdown')) then add_from_menu('select',column) end
 end
-local function add_column(tab)
-  tab.columns[#tab.columns+1]=M.column(tr('Column')..' '..(#tab.columns+1))
-  touch(nil,'add_column'); undo_boundary=true
+local function add_column()
+  if not session or not session.doc or #session.doc.tabs>=8 then return end
+  local board=M.tab(tr('Tab')..' '..(#session.doc.tabs+1))
+  board.columns[1].name=tr('Group')..' 1'
+  session.doc.tabs[#session.doc.tabs+1]=board;session.active=#session.doc.tabs
+  touch(nil,'add_column');undo_boundary=true
 end
+-- Placement is owner/generation scoped. Only a completed target click or native
+-- payload delivery queues creation, and every destination is revalidated then.
+function UI.place_valid(p)
+  return p and p.owner==session and p.epoch==epoch and session and p.doc==session.doc
+    and not session.error and not session.conflict and not modal and not tab_rename and not UI.info
+    and not history_request and startup_layout_frames>=STARTUP_LAYOUT_FRAMES
+end
+function UI.place_begin(kind,mode)
+  if not session or not session.doc then return end
+  UI.end_note_edit();bulk_selection=nil;UI.note_drag=nil
+  UI.place_sequence=(UI.place_sequence or 0)+1
+  UI.place={owner=session,doc=session.doc,epoch=epoch,kind=kind,mode=mode,
+    token=tostring(epoch)..':'..UI.place_sequence}
+end
+function UI.place_update()
+  if not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0) then UI.place_cancelled=nil end
+  local p=UI.place
+  if not p then return end
+  local invalid=not UI.place_valid(p) or escape_pressed
+  if p.mode=='drag' and not invalid then
+    -- GetDragDropPayload can temporarily be empty at the start of a frame,
+    -- before creation_toolbar has registered its source again. Do not revoke
+    -- the drag on that transient gap. Keep it through the release frame,
+    -- so native AcceptDragDropPayload can still report delivery.
+    invalid=not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0)
+  end
+  if invalid then UI.place=nil;UI.place_cancelled=true end
+end
+function UI.place_commit(p,section)
+  if session.pending or not UI.place_valid(p) or UI.place~=p then return end
+  local board,board_index=M.note_column(session.doc,section)
+  if not board then return end
+  session.pending=function()
+    if UI.place==p and UI.place_valid(p) and api.valid(session.target) then
+      local current,index=M.note_column(session.doc,section)
+      if current==board then
+        UI.place=nil;UI.place_cancelled=true;session.active=index
+        board.folded=false;section.folded=false
+        if p.kind=='import' then import_dialog(section) else add_block(p.kind,section) end
+      end
+    end
+    if UI.place==p then UI.place=nil end
+  end
+end
+-- Keep the delete target stationary near the top-left of the document while
+-- a note is being dragged. No explicit drop preview item is inserted into a
+-- section; the target is a normal native widget in the fixed toolbar.
+function UI.drag_trash_target()
+  local drag=UI.note_drag_current()
+  if not drag or UI.place then return nil end
+  local height=math.max(1,UI_METRICS.button_min_height)
+  local side=math.max(0,math.min(UI_METRICS.trash_icon_size,height-UI_METRICS.trash_icon_vertical_inset))
+  local label_x=math.max(UI_METRICS.trash_label_offset_x,
+    UI_METRICS.trash_icon_offset_x+side+UI_METRICS.trash_icon_label_gap)
+  local width=UI_METRICS.trash_icon_only and height or math.max(1,UI_METRICS.trash_target_width)
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  UI.source_button('trash_drop','',width,height)
+  local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+  local color=hovered and UI_PALETTE.trash.text_hover or UI_PALETTE.trash.text
+  local fill=hovered and UI_PALETTE.trash.fill_hover or UI_PALETTE.trash.fill
+  local dl=ImGui.GetWindowDrawList(ctx)
+  ImGui.DrawList_AddRectFilled(dl,sx,sy,sx+width,sy+height,ImGui.GetColorEx(ctx,fill),UI_METRICS.button_rounding)
+  ImGui.DrawList_AddRect(dl,sx,sy,sx+width,sy+height,ImGui.GetColorEx(ctx,color),
+    UI_METRICS.button_rounding,ImGui.DrawFlags_None,hovered and UI_METRICS.trash_hover_border_size or UI_METRICS.trash_border_size)
+  local icon=UI.icon_image('trash')
+  -- GetColorEx is evaluated separately: a function call in the final Lua
+  -- argument position may expand to multiple return values. ReaImGui's
+  -- DrawList_AddImage accepts at most 11 arguments (including draw list).
+  local icon_tint=ImGui.GetColorEx(ctx,color)
+  local icon_x=UI_METRICS.trash_icon_only and (sx+(width-side)*0.5) or (sx+UI_METRICS.trash_icon_offset_x)
+  ImGui.DrawList_AddImage(dl,icon,icon_x,sy+(height-side)*0.5,
+    icon_x+side,sy+(height+side)*0.5,0,0,1,1,icon_tint)
+  if not UI_METRICS.trash_icon_only then
+    ImGui.DrawList_AddText(dl,sx+label_x,sy+(height-ImGui.GetTextLineHeight(ctx))*0.5,
+      ImGui.GetColorEx(ctx,color),tr('Drop to delete'))
+  end
+  ImGui.SetItemTooltip(ctx,tr('Delete note by dropping here'))
+  if ImGui.BeginDragDropTarget(ctx) then
+    local flags=ImGui.DragDropFlags_AcceptBeforeDelivery|ImGui.DragDropFlags_AcceptNoDrawDefaultRect
+    local accepted,token=ImGui.AcceptDragDropPayload(ctx,'P34_NOTE',nil,flags)
+    local active,kind,payload,preview,delivery=ImGui.GetDragDropPayload(ctx)
+    if accepted and active and kind=='P34_NOTE' and token==drag.token and payload==drag.token and delivery then
+      UI.note_delete_drop(drag)
+    end
+    ImGui.EndDragDropTarget(ctx)
+  end
+  return width
+end
+function UI.creation_toolbar()
+  -- Recomputed each frame. The last icon supplies the exact native screen edge
+  -- for controls in child windows with different padding and layout origins.
+  UI.shared_actions_right=nil
+  local enabled=session and session.doc and not session.error and not session.conflict
+    and not modal and not UI.info and not tab_rename and not history_request
+  local dragging=UI.note_drag_current()~=nil
+  local side=UI_METRICS.button_min_height
+  local gap=UI_METRICS.item_gap_x
+  local row={width=math.max(1,ImGui.GetContentRegionAvail(ctx)-UI_METRICS.creation_toolbar_right_inset),used=0}
+  -- The trash slot is always reserved. It is only painted during native DnD,
+  -- so the other toolbar buttons don't jump sideways on drag start.
+  UI.toolbar_right(row,6*side+5*gap)
+  local toolbar_x,toolbar_y=ImGui.GetCursorScreenPos(ctx)
+  if dragging then UI.drag_trash_target() else ImGui.Dummy(ctx,side,side) end
+  ImGui.SameLine(ctx,0,gap)
+  if not dragging and enabled then
+    if UI.quick_access_button('create_group','New group','pencil',side,false,'New group') then
+      local board=active_tab()
+      if board then UI.add_section(board,board.columns[#board.columns]) end
+    end
+  else
+    ImGui.BeginDisabled(ctx,true)
+    UI.quick_access_button('create_group','New group','pencil',side,false,'New group')
+    ImGui.EndDisabled(ctx)
+  end
+  ImGui.BeginDisabled(ctx,not enabled or dragging)
+  for _,action in ipairs({{'text','Text'},{'note','Note with checkbox'},
+      {'select','Dropdown'},{'import','Import text...'}}) do
+    ImGui.SameLine(ctx,0,gap)
+    local p=UI.place
+    local clicked=UI.quick_access_button('create_'..action[1],action[2],action[1],side,
+      p and p.kind==action[1],'Drag or click an icon, then choose a group.')
+    -- Read the actual rectangle immediately: dragging tooltips/popups may
+    -- change the ImGui last-item record later in this loop iteration.
+    if action[1]=='import' then
+      local item_right=ImGui.GetItemRectMax(ctx)
+      UI.shared_actions_right=item_right
+    end
+    if not UI.place_cancelled and enabled and not escape_pressed
+        and startup_layout_frames>=STARTUP_LAYOUT_FRAMES and not dragging
+        and ImGui.BeginDragDropSource(ctx,0) then
+      if not p or p.mode~='drag' or p.kind~=action[1] then UI.place_begin(action[1],'drag');p=UI.place end
+      ImGui.SetDragDropPayload(ctx,'P34_NEW',p.token,ImGui.Cond_Once)
+      ImGui.Text(ctx,tr(action[2]));ImGui.EndDragDropSource(ctx)
+    elseif clicked and not (p and p.mode=='drag') then
+      if p and p.kind==action[1] then UI.place=nil else UI.place_begin(action[1],'click') end
+    end
+  end
+  ImGui.EndDisabled(ctx)
+  if UI.place then
+    local hint=tr('Choose a group. Esc cancels.')
+    ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
+    local hint_w,hint_h=ImGui.CalcTextSize(ctx,hint)
+    ImGui.PopFont(ctx)
+    local hint_x=toolbar_x-UI_METRICS.group_gap-hint_w
+    local wx=ImGui.GetWindowPos(ctx)
+    if hint_x>=wx+UI_METRICS.window_pad_x then
+      ImGui.DrawList_AddText(ImGui.GetWindowDrawList(ctx),hint_x,
+        toolbar_y+(side-hint_h)*0.5,
+        ImGui.GetColor(ctx,ImGui.Col_TextDisabled),hint)
+    end
+  end
+end
+-- Draw-only section highlighting: a whole tab is one recognizable target.
+-- Neither a separate drop strip nor a large layout Dummy is needed.
+function UI.draw_dashed_rect(list,x1,y1,x2,y2,color,dash,gap,thickness)
+  dash=math.max(1,dash or UI_METRICS.drag_note_highlight_dash);gap=math.max(1,gap or UI_METRICS.drag_note_highlight_gap);thickness=thickness or UI_METRICS.drag_note_highlight_border_thickness
+  local step=dash+gap
+  local x=x1
+  while x<x2 do
+    local xe=math.min(x+dash,x2)
+    ImGui.DrawList_AddLine(list,x,y1,xe,y1,color,thickness)
+    ImGui.DrawList_AddLine(list,x,y2,xe,y2,color,thickness)
+    x=x+step
+  end
+  local y=y1
+  while y<y2 do
+    local ye=math.min(y+dash,y2)
+    ImGui.DrawList_AddLine(list,x1,y,x1,ye,color,thickness)
+    ImGui.DrawList_AddLine(list,x2,y,x2,ye,color,thickness)
+    y=y+step
+  end
+end
+local function placement_alpha(color,multiplier)
+  return (color&0xffffff00)|math.max(0,math.min(255,math.floor((color&0xff)*multiplier+0.5)))
+end
+-- The same renderer serves both the source note and placement bodies. Native
+-- draw-list clipping trims off-screen edges without inventing a new border
+-- at the viewport edge. No items or hitboxes are submitted here.
+function UI.note_highlight(sx,sy,width,bottom)
+  local m=UI_METRICS
+  if width<=0 or bottom<=sy then return end
+  local x1,x2=sx-m.drag_note_highlight_padding_x,sx+width+m.drag_note_highlight_padding_x
+  local y1,y2=sy-m.drag_note_highlight_padding_y,bottom+m.drag_note_highlight_padding_y
+  if x2<=x1 or y2<=y1 then return end
+  local accent=ImGui.GetColor(ctx,ImGui.Col_CheckMark)
+  local fill=placement_alpha(accent,UI_PALETTE.drag_note_highlight_fill_alpha)
+  local edge=(accent & 0xffffff00)|UI_PALETTE.drag_note_highlight_edge_alpha
+  local list=ImGui.GetWindowDrawList(ctx)
+  ImGui.DrawList_AddRectFilled(list,x1,y1,x2,y2,fill,m.drag_note_highlight_rounding)
+  UI.draw_dashed_rect(list,x1,y1,x2,y2,edge,m.drag_note_highlight_dash,m.drag_note_highlight_gap,
+    m.drag_note_highlight_border_thickness)
+end
+function UI.placement_target(section,sx,sy,width,bottom,role,activated,visual)
+  local p=UI.place
+  if not UI.place_valid(p) then return end
+  -- EndGroup() has just submitted the whole section as a real native item.
+  -- Do not SetCursorScreenPos() over it: overlay items corrupt group/window
+  -- extents during drag or scrolling (Dear ImGui 1.92+ asserts on this).
+  local hovered=ImGui.IsItemHovered(ctx,
+    ImGui.HoveredFlags_AllowWhenBlockedByActiveItem|ImGui.HoveredFlags_AllowWhenDisabled)
+  if role~='restore' then
+    local mx,my=ImGui.GetMousePos(ctx)
+    local wx,wy=ImGui.GetWindowPos(ctx)
+    local ww,wh=ImGui.GetWindowSize(ctx)
+    -- A section may extend above/below the scrolling child viewport.
+    -- Restrict hover and click to what is physically visible.
+    hovered=mx>=sx and mx<sx+width and my>=sy and my<bottom
+      and mx>=wx and mx<wx+ww and my>=wy and my<wy+wh
+    if visual then UI.note_highlight(visual.x,visual.y,visual.width,visual.bottom) end
+    if hovered then ImGui.SetItemTooltip(ctx,tr('Click or drop into this tab to add here.')) end
+  end
+  if p.mode=='click' then
+    if (role=='restore' and activated or role~='restore' and hovered and ImGui.IsMouseReleased(ctx,0)) then
+      UI.place_commit(p,section)
+    end
+  elseif ImGui.BeginDragDropTarget(ctx) then
+    local flags=ImGui.DragDropFlags_AcceptBeforeDelivery|ImGui.DragDropFlags_AcceptNoDrawDefaultRect
+    local accepted,token=ImGui.AcceptDragDropPayload(ctx,'P34_NEW',nil,flags)
+    local active,kind,payload,_,delivery=ImGui.GetDragDropPayload(ctx)
+    if accepted and active and kind=='P34_NEW' and token==p.token
+        and payload==p.token and delivery then
+      UI.place_commit(p,section)
+    end
+    ImGui.EndDragDropTarget(ctx)
+  end
+  UI.section_hover(section,hovered)
+end
+function UI.section_hover(section,hovered)
+  local drag=(UI.place and UI.place.mode=='drag') and UI.place or UI.note_drag_current()
+  if not drag then return end
+  if hovered and section.folded then
+    local now=reaper.time_precise()
+    if drag.hover_section~=section then drag.hover_section=section;drag.hover_since=now end
+    if now-drag.hover_since>=0.45 then section.folded=false end
+  elseif drag.hover_section==section then drag.hover_section=nil;drag.hover_since=nil end
+end
+
 local function can_history(direction)
   if not session or (not session.doc and not session.history_readonly)
       or (session.error and not (session.history_readonly and not session.doc)) or session.conflict or modal or tab_rename or UI.info then return false end
   return #(direction<0 and session.history.undo or session.history.redo)>0
 end
 local function history_shortcuts()
-  if not session or modal or tab_rename or UI.info or (session.error and not (session.history_readonly and not session.doc)) or session.conflict then return end
+  if not session or modal or tab_rename or UI.info or UI.note_edit or (session.error and not (session.history_readonly and not session.doc)) or session.conflict then return end
   if not ImGui.IsWindowFocused(ctx,ImGui.FocusedFlags_RootAndChildWindows) then return end
   -- NoUndoRedo on document inputs prevents both histories firing for one chord.
   -- Mod_Ctrl maps to Cmd under ReaImGui's native macOS behavior.
@@ -2200,12 +3601,16 @@ local function history_shortcuts()
 end
 local HISTORY_ACTIONS = {
   color_marker={'color marker','цветовую метку'},delete_selected={'delete selected elements','удаление выделенных элементов'},
+  group_color={'group header color','цвет заголовка группы'},delete_group={'delete group','удаление группы'},
+  add_group={'add group','добавление группы'},move_group={'move group','перемещение группы'},
+  rename_group={'rename group','переименование группы'},
 
   change={'change','изменение'},typing={'typing','ввод текста'},deletion={'text deletion','удаление текста'},
   paste={'paste','вставку текста'},cut={'cut','вырезание текста'},replace={'text replacement','замену текста'},
-  line_break={'line break','перевод строки'},checkbox={'checkbox change','отметку'},
+  line_break={'line break','перевод строки'},edit_note={'note edit','изменение заметки'},checkbox={'checkbox change','отметку'},
   choose_option={'option selection','выбор значения'},edit_dropdown={'dropdown edit','изменение списка'},
-  add_note={'add note','добавление заметки'},delete_item={'delete note','удаление заметки'},move_note={'move note','перемещение заметки'},
+  add_note={'add note','добавление заметки'},delete_item={'delete note','удаление заметки'},
+  delete_note={'delete note','удаление заметки'},move_note={'move note','перемещение заметки'},
   add_dropdown={'add dropdown','добавление списка'},add_tab={'add tab','добавление вкладки'},
   delete_tab={'delete tab','удаление вкладки'},rename_tab={'rename tab','переименование вкладки'},move_tab={'move tab','перемещение вкладки'},
   add_column={'add column','добавление колонки'},delete_column={'delete column','удаление колонки'},
@@ -2226,7 +3631,7 @@ function UI.history_item(direction,label_width)
   local mac=os_name:match('OSX') or os_name:match('macOS')
   local shortcut=mac and (direction<0 and '⌘Z' or '⇧⌘Z') or (direction<0 and 'Ctrl+Z' or 'Ctrl+Shift+Z')
   local space=math.max(1,(ImGui.CalcTextSize(ctx,' ')))
-  local padding=math.max(2,math.ceil((label_width-ImGui.CalcTextSize(ctx,caption)+12)/space))
+  local padding=math.max(UI_METRICS.history_shortcut_min_spaces,math.ceil((label_width-ImGui.CalcTextSize(ctx,caption)+UI_METRICS.history_shortcut_gap)/space))
   -- Keep the shortcut beside these rows: long unrelated menu labels must not
   -- force ImGui's shared shortcut column farther to the right.
   return ImGui.MenuItem(ctx,caption..string.rep(' ',padding)..shortcut..'###'..base,nil,false,can_history(direction))
@@ -2236,7 +3641,7 @@ local function menu_bar()
   if not ImGui.BeginMenuBar(ctx) then return end
   local enabled=session~=nil and session.doc~=nil and session.error==nil and session.conflict==nil
   if UI.begin_menu('Edit') then
-    if ImGui.MenuItem(ctx,ui_label('Import text...'),nil,false,enabled) then import_dialog() end
+    if ImGui.MenuItem(ctx,ui_label('Import text...'),nil,false,enabled) then add_from_menu('import') end
     if ImGui.MenuItem(ctx,ui_label('Open recovery copy...'),nil,false,session~=nil and not session.conflict and not session.dirty) then
       local selected,path=reaper.GetUserFileNameForRead(recovery_root()..'/',tr('Open recovery copy...'),'notes')
       if selected then
@@ -2252,40 +3657,28 @@ local function menu_bar()
     if UI.history_item(1,history_width) then history_request=1 end
     ImGui.EndPopup(ctx)
   end
-  if UI.begin_menu('Tab',enabled) then
-    if ImGui.MenuItem(ctx,ui_label('New tab')) then
-      request_modal({kind='new_tab',title='New tab',value=tr('New note')})
-    end
-    if ImGui.MenuItem(ctx,ui_label('Rename')) then
-      begin_tab_rename(active_tab())
-    end
+  if UI.begin_menu('Tabs',enabled) then
+    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_column() end
     ImGui.Separator(ctx)
-    if ImGui.MenuItem(ctx,ui_label('Move left'),nil,false,session.active>1) then
-      session.active=M.move(session.doc.tabs,session.active,-1); force_tab=active_tab().id; touch(nil,'move_tab')
-    end
-    if ImGui.MenuItem(ctx,ui_label('Move right'),nil,false,session.active<#session.doc.tabs) then
-      session.active=M.move(session.doc.tabs,session.active,1); force_tab=active_tab().id; touch(nil,'move_tab')
-    end
-    ImGui.Separator(ctx)
-    if ImGui.MenuItem(ctx,ui_label('Delete tab...'),nil,false,#session.doc.tabs>1) then
-      confirm_tab_delete(active_tab())
+    for index,board in ipairs(session.doc.tabs) do
+      if ImGui.BeginMenu(ctx,label(board.name)..'##board_menu_'..board.id) then
+        if ImGui.MenuItem(ctx,ui_label('Switch to tab')) then session.active=index end
+        UI.board_actions(board,index);ImGui.EndMenu(ctx)
+      end
     end
     ImGui.EndPopup(ctx)
   end
   if UI.begin_menu('Add',enabled) then
-    local tab=active_tab()
-    if #tab.columns==1 then add_menu(tab.columns[1])
-    else
-      for _,column in ipairs(tab.columns) do
-        if ImGui.BeginMenu(ctx,label(column.name)..'##'..column.id) then add_menu(column); ImGui.EndMenu(ctx) end
-      end
-    end
+    add_menu()
     ImGui.Separator(ctx)
-    if ImGui.MenuItem(ctx,ui_label('Column'),nil,false,#tab.columns<8) then add_column(tab) end
+    if ImGui.MenuItem(ctx,ui_label('New group')) then
+      local board=active_tab()
+      UI.add_section(board,board.columns[#board.columns])
+    end
+    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_column() end
     ImGui.EndPopup(ctx)
   end
   if UI.begin_menu('View') then
-    if ImGui.MenuItem(ctx,ui_label('Edit mode'),nil,editing) then editing=not editing; pref('editing',editing and '1' or '0') end
     if ImGui.MenuItem(ctx,ui_label('Hide completed'),nil,hide_completed) then
       hide_completed=not hide_completed;pref('hide_completed',hide_completed and '1' or '0')
     end
@@ -2297,6 +3690,17 @@ local function menu_bar()
         if ImGui.MenuItem(ctx,ui_label(option[2]),nil,marker_style==option[1]) then
           marker_style=option[1];pref('marker_style',marker_style)
         end
+      end
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.BeginMenu(ctx,ui_label('Note spacing')) then
+      ImGui.TextDisabled(ctx,tr('Gap above and below the separator'))
+      ImGui.SetNextItemWidth(ctx,180)
+      local moved,value=ImGui.SliderInt(ctx,'##note_spacing',note_spacing,
+        UI_METRICS.note_spacing_min,UI_METRICS.note_spacing_max,'%d px')
+      if moved then note_spacing=value;pref('note_spacing',note_spacing) end
+      if ImGui.MenuItem(ctx,ui_label('Reset spacing')) then
+        note_spacing=UI_METRICS.note_spacing_default;pref('note_spacing',note_spacing)
       end
       ImGui.EndMenu(ctx)
     end
@@ -2320,21 +3724,17 @@ local function menu_bar()
   end
   ImGui.EndMenuBar(ctx)
 end
-UI.marker_palette={
-  light={red=0xc15251ff,orange=0xb5782bff,yellow=0xa29227ff,
-    green=0x54816aff,blue=0x527fa1ff,purple=0x8c6ca1ff},
-  dark={red=0xe88a85ff,orange=0xe6b767ff,yellow=0xd6c75fff,
-    green=0x82b79aff,blue=0x8fb8d6ff,purple=0xbba0cdff},
-}
+UI.marker_palette=MARKER_PALETTE -- compatibility alias; edit the palette in UI SETTINGS
 function UI.marker_color(key)
   local palette=UI.marker_palette[theme=='dark' and 'dark' or 'light']
   local color=ImGui.GetColorEx(ctx,palette[key])
   return color
 end
-function UI.marker_tint(base,key)
+function UI.marker_tint(base,key,override_amount)
+  if key==nil then return base end
   local palette=UI.marker_palette[theme=='dark' and 'dark' or 'light']
   local tint=palette[key]
-  local amount=theme=='dark' and 0.18 or 0.12
+  local amount=override_amount or (theme=='dark' and UI_PALETTE.marker_tint_dark or UI_PALETTE.marker_tint_light)
   local color=base&0xff
   for _,shift in ipairs({24,16,8}) do
     local channel=math.floor(((base>>shift)&0xff)*(1-amount)+((tint>>shift)&0xff)*amount+0.5)
@@ -2345,37 +3745,50 @@ end
 -- A splitter belongs to one window draw list. Column keys are weak so a
 -- suspended document cannot keep its old render resources alive.
 UI.marker_layers=setmetatable({},{__mode='k'})
-function UI.marker_layer(column)
+UI.placement_layers=setmetatable({},{__mode='k'})
+function UI.marker_layer(column,layers)
+  layers=layers or UI.marker_layers
   local draw_list=ImGui.GetWindowDrawList(ctx)
-  local layer=UI.marker_layers[column]
+  local layer=layers[column]
   if not layer or layer.draw_list~=draw_list or not ImGui.ValidatePtr(layer.splitter,'ImGui_DrawListSplitter*') then
     layer={draw_list=draw_list,splitter=ImGui.CreateDrawListSplitter(draw_list)}
-    UI.marker_layers[column]=layer
+    layers[column]=layer
   end
   return layer
 end
-local function marker_menu(current,apply)
-  if ImGui.MenuItem(ctx,ui_label('No marker'),nil,current==nil) then apply(nil) end
+local function marker_menu(current,apply,none_caption,id_prefix)
+  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,UI_METRICS.item_gap_x,UI_METRICS.item_gap_y)
+  if ImGui.MenuItem(ctx,ui_label(none_caption or 'No marker'),nil,current==nil) then apply(nil) end
   ImGui.Separator(ctx)
+  local space_width=math.max(1,(ImGui.CalcTextSize(ctx,' ')))
+  local inset=UI_METRICS.marker_menu_offset_x+UI_METRICS.marker_menu_side+UI_METRICS.marker_menu_text_gap
+  local spaces=math.max(UI_METRICS.marker_menu_label_spaces,math.ceil(inset/space_width))
   for _,key in ipairs(M.marker_keys) do
     local name=key:sub(1,1):upper()..key:sub(2)
-    local clicked=ImGui.MenuItem(ctx,'   '..tr(name)..'###marker_'..key,nil,current==key)
+    local clicked=ImGui.MenuItem(ctx,string.rep(' ',spaces)..tr(name)..'###'..(id_prefix or 'marker_')..key,nil,current==key)
     local x,y=ImGui.GetItemRectMin(ctx)
     local _,bottom=ImGui.GetItemRectMax(ctx)
     local center=(y+bottom)*0.5
-    ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),x+3,center-4,x+11,center+4,UI.marker_color(key),1)
+    ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),x+UI_METRICS.marker_menu_offset_x,center-UI_METRICS.marker_menu_side*0.5,
+      x+UI_METRICS.marker_menu_offset_x+UI_METRICS.marker_menu_side,center+UI_METRICS.marker_menu_side*0.5,
+      UI.marker_color(key),UI_METRICS.marker_menu_rounding)
     if clicked then apply(key) end
   end
+  ImGui.PopStyleVar(ctx);ImGui.PopFont(ctx)
 end
 local function start_selection(tab,column)
+  UI.end_note_edit()
+  session.active_group_id=column.id
   session.history.key=nil;session.input_state=nil
   bulk_selection={owner=session,tab_id=tab.id,column=column,selected={}}
 end
-local function selection_toolbar(column)
+local function selection_toolbar(column,actions_right)
   local current=bulk_selection
   local count,total=M.selection_prune(column,current.selected,hide_completed)
   ImGui.TextWrapped(ctx,column.name..' — '..tr('Selected: %d'):format(count))
-  local width=ImGui.GetContentRegionAvail(ctx)
+  local sx=ImGui.GetCursorScreenPos(ctx)
+  local width=math.max(1,math.min(ImGui.GetContentRegionAvail(ctx),actions_right-sx))
   local row={width=width,used=0}
   local function button(caption,enabled,icon)
     local w,h=UI.button_size(tr(caption))
@@ -2420,7 +3833,10 @@ local function selection_toolbar(column)
   end
   if button('Done',true,'close') then bulk_selection=nil end
   if escape_pressed and not modal then bulk_selection=nil end
-  ImGui.Separator(ctx)
+  -- Match both ends of the note separators using the same group indent.
+  ImGui.Indent(ctx,UI_METRICS.inner_gap+UI_METRICS.note_row_inset_x)
+  UI.note_separator(actions_right)
+  ImGui.Unindent(ctx,UI_METRICS.inner_gap+UI_METRICS.note_row_inset_x)
 end
 local function block_actions(tab,column,index)
   ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
@@ -2429,7 +3845,7 @@ local function block_actions(tab,column,index)
     local down=M.block_neighbor(column,index,1,hide_completed,completed_last)
     if ImGui.MenuItem(ctx,ui_label('Move up'),nil,false,up~=nil) then session.pending=function() M.move(column.blocks,index,up-index); touch(nil,'move_note') end end
     if ImGui.MenuItem(ctx,ui_label('Move down'),nil,false,down~=nil) then session.pending=function() M.move(column.blocks,index,down-index); touch(nil,'move_note') end end
-    if ImGui.BeginMenu(ctx,ui_label('Move to column'),#tab.columns>1) then
+    if ImGui.BeginMenu(ctx,ui_label('Move to group'),#tab.columns>1) then
       for _,target in ipairs(tab.columns) do
         if target~=column and ImGui.MenuItem(ctx,label(target.name)..'##'..target.id) then
           session.pending=function()
@@ -2452,176 +3868,334 @@ local function block_actions(tab,column,index)
   end
   ImGui.PopFont(ctx)
 end
-function UI.block_action_button()
-  if editing then
+-- The palette lives directly on each note, not hidden behind bulk selection.
+-- It appears while hovering a note and occupies the pre-existing actions slot;
+-- it does not change note width, scrolling or the right alignment guide.
+UI.note_bounds=setmetatable({},{__mode='k'})
+function UI.block_action_button(block)
+  if UI.note_editing(block) then
     return UI.button(ctx,ui_label('...##actions'))
+  end
+  local width,height=UI.button_size('...')
+  local rect=UI.note_bounds[block]
+  local mx,my=ImGui.GetMousePos(ctx)
+  local hovering=rect and mx>=rect[1] and mx<=rect[3]
+    and my>=rect[2] and my<=rect[4]
+    and ImGui.IsWindowHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+  local palette_open=ImGui.IsPopupOpen(ctx,'note_palette')
+  if not bulk_selection and not UI.note_drag_current() and not UI.place
+      and (hovering or palette_open) then
+    local sx,sy=ImGui.GetCursorScreenPos(ctx)
+    local clicked=UI.source_button('note_palette_'..block.id,'',width,height)
+    local icon=UI.icon_image('palette')
+    local side=math.max(1,math.min(UI_METRICS.quick_icon_size,width-4,height-4))
+    local ix,iy=sx+(width-side)*0.5,sy+(height-side)*0.5
+    local tint=ImGui.GetColor(ctx,ImGui.Col_Text)
+    ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),icon,
+      ix,iy,ix+side,iy+side,0,0,1,1,tint)
+    ImGui.SetItemTooltip(ctx,tr('Color marker'))
+    if clicked then ImGui.OpenPopup(ctx,'note_palette') end
   else
-    ImGui.Dummy(ctx,UI.button_size('...'))
-    return false
+    ImGui.Dummy(ctx,width,height)
   end
+  if begin_action_popup('note_palette') then
+    marker_menu(block.color,function(key)
+      if block.color~=key then
+        block.color=key;touch(nil,'color_marker');undo_boundary=true
+      end
+    end)
+    ImGui.EndPopup(ctx)
+  end
+  return false
 end
-local function dropdown_header(tab,column,b,index,width)
-  local actions_clicked=false
-  local layout=UI.column_header_layout(width,tr('Edit...'))
-  local table_open=layout.inline and ImGui.BeginTable(ctx,'dropdown_header',2,
-    ImGui.TableFlags_SizingStretchSame|ImGui.TableFlags_NoSavedSettings,width)
-  if not layout.inline or table_open then
-    if table_open then
-      ImGui.TableSetupColumn(ctx,'Name',ImGui.TableColumnFlags_WidthStretch,1)
-      ImGui.TableSetupColumn(ctx,'Controls',ImGui.TableColumnFlags_WidthFixed,layout.width)
-      ImGui.TableNextRow(ctx);ImGui.TableNextColumn(ctx)
-    end
-    UI.read_text(b.label,b)
-    if table_open then ImGui.TableNextColumn(ctx) end
-    if editing then
-      if UI.button(ctx,ui_label('Edit...'),true) then request_modal(clone_select(b)) end
+-- Shared note shell. All note kinds stay in the calling page_body window;
+-- these non-scrolling tables only allocate cells, never child windows.
+-- The optional editor child and native combo popup are leaf input surfaces.
+function UI.note_layout(block,width)
+  local m=UI_METRICS
+  local text_h=ImGui.GetTextLineHeight(ctx)
+  ImGui.PushFont(ctx,ui_font,m.font_size)
+  local checkbox_h=ImGui.GetTextLineHeight(ctx)+2*m.checkbox_pad_y
+  ImGui.PopFont(ctx)
+  local action_w,action_h=UI.button_size('...')
+  local edit_w,edit_h=UI.button_size(tr('Edit...'),true)
+  local checked=block.kind=='note' or block.kind=='check'
+  local row=M.note_row_layout(text_h,checkbox_h,checked,m,
+    math.max(checkbox_h,action_h,edit_h))
+  row.has_checkbox=checked
+  row.checkbox_width=checkbox_h+m.note_checkbox_text_gap
+  row.action_width=action_w+m.item_gap_x;row.action_height=action_h
+  row.wide=width>=row.action_width+m.note_actions_min_content_width
+  row.has_accessory=block.kind=='select' and UI.note_editing(block) and row.wide
+    and width>=row.action_width+edit_w+2*m.item_gap_x+m.note_actions_min_content_width
+  row.accessory_width=edit_w;row.accessory_height=edit_h
+  row.width=width
+  row.origin_x,row.origin_y=ImGui.GetCursorScreenPos(ctx)
+  row.actions_right=row.origin_x+width
+  return row
+end
+function UI.note_text_body(tab,column,b,row)
+  if b.kind~='select' and UI.note_editing(b) then
+    local edit=UI.note_edit
+    local _,n=edit.value:gsub('\n','\n')
+    local h=math.max(UI_METRICS.note_edit_min_height,math.min(UI_METRICS.note_edit_max_height,
+      (n+UI_METRICS.note_edit_extra_lines)*ImGui.GetTextLineHeight(ctx)+UI_METRICS.note_edit_extra_height))
+    -- This child is an input widget only. Row anchors remain in page_body.
+    UI.wrapped_editor(edit,h,'##note_wrapped',true)
+    if edit.commit_requested then UI.end_edit_after_frame=edit end
+    return row.top+row.center
+  end
+  local text=(b.kind=='select' or b.kind=='check') and b.label or b.text
+  local center=UI.read_text(text~='' and text or tr('(Empty text block)'),b)
+  UI.note_text_click(tab,column,b,ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem))
+  return center or (row.top+row.center)
+end
+function UI.note_heading(tab,column,b,row)
+  row.content_x,row.content_y=ImGui.GetCursorScreenPos(ctx)
+  local columns=1+(row.has_checkbox and 1 or 0)+(row.has_accessory and 1 or 0)
+  if not ImGui.BeginTable(ctx,'note_heading',columns,
+      ImGui.TableFlags_SizingFixedFit|ImGui.TableFlags_NoSavedSettings) then return end
+  if row.has_checkbox then
+    ImGui.TableSetupColumn(ctx,'Check',ImGui.TableColumnFlags_WidthFixed,row.checkbox_width)
+  end
+  ImGui.TableSetupColumn(ctx,'Text',ImGui.TableColumnFlags_WidthStretch,1)
+  if row.has_accessory then
+    ImGui.TableSetupColumn(ctx,'Accessory',ImGui.TableColumnFlags_WidthFixed,
+      row.accessory_width+UI_METRICS.item_gap_x)
+  end
+  ImGui.TableNextRow(ctx,0,row.height)
+  -- Submit text first for every kind; native checkbox padding cannot become
+  -- the baseline of a following text cell. The leading slot is optional.
+  local text_column=row.has_checkbox and 1 or 0
+  ImGui.TableSetColumnIndex(ctx,text_column)
+  local x,y=ImGui.GetCursorScreenPos(ctx)
+  row.text_x=x;row.top=y
+  ImGui.SetCursorScreenPos(ctx,x,y+row.text_y)
+  local center=UI.note_text_body(tab,column,b,row)
+  row.first_line_center=center
+  if row.has_checkbox then
+    ImGui.TableSetColumnIndex(ctx,0)
+    -- Actual first-line position is the common anchor for all accessories.
+    local check_row={top=center-row.center,checkbox_y=row.checkbox_y}
+    local changed,value=UI.note_checkbox(b.checked,check_row)
+    if changed then b.checked=value;touch(nil,'checkbox');undo_boundary=true end
+  end
+  if row.has_accessory and UI.note_editing(b) then
+    ImGui.TableSetColumnIndex(ctx,text_column+1)
+    local ax=ImGui.GetCursorScreenPos(ctx)
+    ImGui.SetCursorScreenPos(ctx,ax+UI_METRICS.item_gap_x,center-row.accessory_height*0.5)
+    if UI.button(ctx,ui_label('Edit...'),true) then request_modal(clone_select(b)) end
+  end
+  ImGui.EndTable(ctx)
+  return center
+end
+function UI.note_value_body(b)
+  local combo_width=math.max(1,math.min(UI_METRICS.dropdown_width,ImGui.GetContentRegionAvail(ctx)))
+  ImGui.SetNextItemWidth(ctx,combo_width)
+  ImGui.SetNextWindowSizeConstraints(ctx,combo_width,0,combo_width,
+    math.min(UI_METRICS.dropdown_visible_rows,#b.options)*ImGui.GetTextLineHeightWithSpacing(ctx)+UI_METRICS.dropdown_popup_extra_height)
+  if ImGui.BeginCombo(ctx,'##value',b.options[b.selected]) then
+    if escape_pressed then ImGui.CloseCurrentPopup(ctx)
     else
-      ImGui.Dummy(ctx,layout.add_width,layout.add_height)
+      for i,option in ipairs(b.options) do
+        ImGui.PushID(ctx,i)
+        if ImGui.Selectable(ctx,label(option)..'##option',i==b.selected) then
+          b.selected=i;touch(nil,'choose_option');undo_boundary=true
+        end
+        if i==b.selected then ImGui.SetItemDefaultFocus(ctx) end
+        ImGui.PopID(ctx)
+      end
     end
-    if not layout.stacked then ImGui.SameLine(ctx,0,UI_METRICS.item_gap_x) end
-    actions_clicked=UI.block_action_button()
-    if table_open then ImGui.EndTable(ctx) end
+    ImGui.EndCombo(ctx)
   end
-  return actions_clicked
 end
-local function draw_block(tab,column,b,index)
-  local block_width=ImGui.GetContentRegionAvail(ctx)
-  local actions_clicked=false
-  if b.kind=='select' then actions_clicked=dropdown_header(tab,column,b,index,block_width) end
-  -- Keep the actions gutter on wide columns; stack it below narrow widgets.
-  local wide=block_width>=180
-  local table_open=wide and ImGui.BeginTable(ctx,'block',2,
-    ImGui.TableFlags_SizingStretchSame|ImGui.TableFlags_NoSavedSettings,block_width)
-  if not wide or table_open then
+local function draw_block(tab,column,b,index,actions_right)
+  local anchor_hovered,has_timecode=UI.timecode_badge(b)
+  if has_timecode then UI.seek_note(b,anchor_hovered) end
+  local x,y=ImGui.GetCursorScreenPos(ctx)
+  local width=math.max(1,math.min(ImGui.GetContentRegionAvail(ctx),actions_right-x))
+  local row=UI.note_layout(b,width)
+  local actions_clicked,first_line_center=false,nil
+  -- Every note owns this same padding/spacing contract. No kind inherits
+  -- native table CellPadding, and no hidden button determines heading height.
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_CellPadding,0,0)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,UI_METRICS.item_gap_x,0)
+  local table_open=row.wide and ImGui.BeginTable(ctx,'block',2,
+    ImGui.TableFlags_SizingStretchSame|ImGui.TableFlags_NoSavedSettings,width)
+  if not row.wide or table_open then
     if table_open then
       ImGui.TableSetupColumn(ctx,'Content',ImGui.TableColumnFlags_WidthStretch,1)
-      ImGui.TableSetupColumn(ctx,'Actions',ImGui.TableColumnFlags_WidthFixed,(UI.button_size('...')))
-      ImGui.TableNextRow(ctx); ImGui.TableNextColumn(ctx)
+      ImGui.TableSetupColumn(ctx,'Actions',ImGui.TableColumnFlags_WidthFixed,row.action_width)
+      ImGui.TableNextRow(ctx,0,row.height);ImGui.TableNextColumn(ctx)
     end
-    local rv,value
-    if b.kind=='text' or b.kind=='note' then
-      if b.kind=='note' then
-        rv,value=UI.checkbox('##checked',b.checked)
-        if rv then b.checked=value; touch(nil,'checkbox'); undo_boundary=true end
-        if wide then ImGui.SameLine(ctx) end
-      end
-      if editing then
-        local _,n=b.text:gsub('\n','\n')
-        local h=math.max(56,math.min(240,(n+2)*ImGui.GetTextLineHeight(ctx)+12))
-        rv,value=UI.document_input('text:'..b.id,'##text',b.text,true,h)
-        if rv then b.text=value end
-      else
-        UI.read_text(b.text~='' and b.text or tr('(Empty text block)'),b)
-      end
-    elseif b.kind=='check' then
-      rv,value=UI.checkbox('##checked',b.checked)
-      if rv then b.checked=value; touch(nil,'checkbox'); undo_boundary=true end
-      if wide then ImGui.SameLine(ctx) end
-      if editing then
-        ImGui.SetNextItemWidth(ctx,-1)
-        rv,value=UI.document_input('label:'..b.id,'##label',b.label,false)
-        if rv then b.label=value end
-      else UI.read_text(b.label,b) end
-    else
-      -- Capture ONLY width. Height must never influence the dropdown size.
-      -- The 420px preferred width yields to a narrower column, preventing clipping.
-      local available_width=ImGui.GetContentRegionAvail(ctx)
-      local combo_width=math.max(1,math.min(UI_METRICS.dropdown_width,available_width))
-      ImGui.SetNextItemWidth(ctx,combo_width)
-      ImGui.SetNextWindowSizeConstraints(ctx,combo_width,0,combo_width,math.min(8,#b.options)*ImGui.GetTextLineHeightWithSpacing(ctx)+16)
-      if ImGui.BeginCombo(ctx,'##value',b.options[b.selected]) then
-        if escape_pressed then ImGui.CloseCurrentPopup(ctx)
-        else
-        for i,option in ipairs(b.options) do
-          ImGui.PushID(ctx,i)
-          if ImGui.Selectable(ctx,label(option)..'##option',i==b.selected) then b.selected=i; touch(nil,'choose_option'); undo_boundary=true end
-          if i==b.selected then ImGui.SetItemDefaultFocus(ctx) end
-          ImGui.PopID(ctx)
-        end
-        end
-        ImGui.EndCombo(ctx)
-      end
+    first_line_center=UI.note_heading(tab,column,b,row)
+    if table_open then
+      ImGui.TableNextColumn(ctx)
+      local ax,ay=ImGui.GetCursorScreenPos(ctx)
+      ImGui.SetCursorScreenPos(ctx,ax,(first_line_center or (ay+row.center))-row.action_height*0.5)
+      actions_clicked=UI.block_action_button(b)
     end
-    if table_open then ImGui.TableNextColumn(ctx) end
-    if b.kind~='select' then actions_clicked=UI.block_action_button() end
+    if b.kind=='select' then
+      if table_open then ImGui.TableNextRow(ctx);ImGui.TableNextColumn(ctx) end
+      local bx,by=ImGui.GetCursorScreenPos(ctx)
+      ImGui.SetCursorScreenPos(ctx,bx,by+UI_METRICS.note_content_gap_y)
+      UI.note_value_body(b)
+    end
+    if not table_open then actions_clicked=UI.block_action_button(b) end
     if table_open then ImGui.EndTable(ctx) end
   end
-  return actions_clicked
+  ImGui.PopStyleVar(ctx,2)
+  return actions_clicked,first_line_center,row
 end
-local function draw_selection_block(column,b,index)
+local function draw_selection_block(column,b,index,actions_right)
   local sx,sy=ImGui.GetCursorScreenPos(ctx)
-  local width=math.max(1,ImGui.GetContentRegionAvail(ctx))
+  local width=math.max(1,math.min(ImGui.GetContentRegionAvail(ctx),actions_right-sx))
   local summary=b.text or b.label or ''
   if b.kind=='note' or b.kind=='check' then summary=(b.checked and '[x] ' or '[ ] ')..summary
   elseif b.kind=='select' then summary=summary..'\n'..b.options[b.selected] end
   if summary=='' then summary=tr('(Empty text block)') end
-  ImGui.PushID(ctx,b.id)
   ImGui.BeginGroup(ctx)
-  UI.read_text(summary,b,math.max(1,width-22))
+  UI.timecode_badge(b)
+  local center=UI.read_text(summary,b,math.max(1,width-
+    math.max(UI_METRICS.selection_text_gutter,UI_METRICS.selection_check_right_offset)))
   ImGui.EndGroup(ctx)
   local _,bottom=ImGui.GetItemRectMax(ctx)
-  local height=math.max(23,bottom-sy+4)
+  local height=math.max(UI_METRICS.selection_min_height,bottom-sy+UI_METRICS.selection_bottom_pad)
   ImGui.SetCursorScreenPos(ctx,sx,sy)
-  if ImGui.InvisibleButton(ctx,'##bulk_select_'..index,width,height,
+  ImGui.Dummy(ctx,width,height)
+  return center
+end
+function UI.selection_hit_area(b,sx,sy,width,bottom,center)
+  local save_x,save_y=ImGui.GetCursorScreenPos(ctx)
+  ImGui.SetCursorScreenPos(ctx,sx,sy)
+  if ImGui.InvisibleButton(ctx,'##bulk_select',width,math.max(1,bottom-sy),
       ImGui.ButtonFlags_MouseButtonLeft|ImGui.ButtonFlags_EnableNav) then
     local selected=bulk_selection.selected
     selected[b.id]=not selected[b.id] or nil
   end
+  local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
   if bulk_selection.selected[b.id] then
-    local color=ImGui.GetColor(ctx,ImGui.Col_CheckMark)
-    ImGui.DrawList_AddRect(ImGui.GetWindowDrawList(ctx),sx,sy,sx+width,sy+height,color,2,ImGui.DrawFlags_None,1)
     ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
-    ImGui.DrawList_AddText(ImGui.GetWindowDrawList(ctx),sx+math.max(0,width-18),sy+2,color,'✓')
+    local tw,th=ImGui.CalcTextSize(ctx,'✓')
+    ImGui.DrawList_AddText(ImGui.GetWindowDrawList(ctx),
+      sx+math.max(0,width-UI_METRICS.item_gap_x-tw),
+      (center or (sy+bottom)*0.5)-th*0.5,ImGui.GetColor(ctx,ImGui.Col_Text),'✓')
     ImGui.PopFont(ctx)
   end
-  ImGui.PopID(ctx)
+  ImGui.SetCursorScreenPos(ctx,save_x,save_y)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,0,0)
+  ImGui.Dummy(ctx,0,0)
+  ImGui.PopStyleVar(ctx)
+  return hovered
 end
-local function draw_marked_block(tab,column,b,index)
+function UI.note_marker_strip(key,sx,sy,bottom,gutter)
+  local m=UI_METRICS
+  local left=math.min(gutter,m.marker_strip_offset_x)
+  local right=math.min(gutter,left+m.marker_strip_width)
+  if right>left then
+    ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),sx+left,sy+m.marker_strip_pad_y,
+      sx+right,math.max(sy+m.marker_strip_min_bottom_offset,bottom-m.marker_strip_pad_y),
+      UI.marker_color(key),m.marker_strip_rounding)
+  end
+end
+function UI.note_gutter(width)
+  local m=UI_METRICS
+  local marker_right=m.marker_strip_offset_x+m.marker_strip_width
+  local handle_x=math.max(m.drag_handle_offset_x,marker_right)
+  local wanted=math.max(m.note_indent,handle_x+m.drag_handle_width+m.note_gutter_end_gap)
+  return math.min(wanted,math.max(0,width-1))
+end
+function UI.note_padding(height)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,0,0)
+  ImGui.Dummy(ctx,0,height)
+  ImGui.PopStyleVar(ctx)
+end
+local function draw_marked_block(tab,column,b,index,actions_right)
   local sx,sy=ImGui.GetCursorScreenPos(ctx)
-  local width=ImGui.GetContentRegionAvail(ctx)
+  local width=math.min(ImGui.GetContentRegionAvail(ctx),math.max(1,actions_right-sx))
   local selecting=bulk_selection and bulk_selection.column==column
   ImGui.PushID(ctx,b.id)
   local completed=M.completed(b)
   if completed then
     local alpha=ImGui.GetStyleVar(ctx,ImGui.StyleVar_Alpha)
-    ImGui.PushStyleVar(ctx,ImGui.StyleVar_Alpha,alpha*0.55)
+    ImGui.PushStyleVar(ctx,ImGui.StyleVar_Alpha,alpha*UI_METRICS.completed_note_alpha)
   end
   local layer
-  if b.color and marker_style=='fill' then
+  -- A palette popup can change the model while draw_block is submitted.
+  -- Keep this shell's background, style pushes and marker on one frame value.
+  local frame_marker=b.color
+  local colored_fill=frame_marker and marker_style=='fill'
+  if colored_fill or selecting then
     layer=UI.marker_layer(column)
     ImGui.DrawListSplitter_Split(layer.splitter,2)
     ImGui.DrawListSplitter_SetCurrentChannel(layer.splitter,1)
+  end
+  if colored_fill then
     -- Native edit fields and checkboxes share the same soft tint as the
     -- block background. Text colors, focus and input behavior stay native.
     for _,key in ipairs({ImGui.Col_FrameBg,ImGui.Col_FrameBgHovered,ImGui.Col_FrameBgActive}) do
       local base=ImGui.GetStyleColor(ctx,key)
-      ImGui.PushStyleColor(ctx,key,UI.marker_tint(base,b.color))
+      ImGui.PushStyleColor(ctx,key,UI.marker_tint(base,frame_marker))
     end
   end
-  ImGui.Indent(ctx,8)
+  local gutter=UI.note_gutter(width)
+  -- Indent(0) means the native default indent, not zero pixels.
+  if gutter>0 then ImGui.Indent(ctx,gutter) end
   ImGui.BeginGroup(ctx)
-  local actions_clicked=false
-  if selecting then draw_selection_block(column,b,index)
-  else actions_clicked=draw_block(tab,column,b,index) end
+  UI.note_padding(UI_METRICS.note_padding_y)
+  -- Measure content independently of native trailing ItemSpacing. Both sides
+  -- of the shell get the same actual padding, which also belongs to its fill.
+  ImGui.BeginGroup(ctx)
+  local actions_clicked,first_line_center=false,nil
+  if selecting then first_line_center=draw_selection_block(column,b,index,actions_right)
+  else actions_clicked,first_line_center=draw_block(tab,column,b,index,actions_right) end
+  ImGui.EndGroup(ctx)
+  local _,content_bottom=ImGui.GetItemRectMax(ctx)
+  local pad_x=ImGui.GetCursorScreenPos(ctx)
+  ImGui.SetCursorScreenPos(ctx,pad_x,content_bottom)
+  UI.note_padding(UI_METRICS.note_padding_y)
   ImGui.EndGroup(ctx)
   local _,bottom=ImGui.GetItemRectMax(ctx)
-  ImGui.Unindent(ctx,8)
+  if gutter>0 then ImGui.Unindent(ctx,gutter) end
+  local selection_hovered=selecting and UI.selection_hit_area(b,sx,sy,width,bottom,first_line_center)
   if layer then
-    ImGui.PopStyleColor(ctx,3)
+    if colored_fill then ImGui.PopStyleColor(ctx,3) end
     ImGui.DrawListSplitter_SetCurrentChannel(layer.splitter,0)
-    local base=ImGui.GetStyleColor(ctx,ImGui.Col_ChildBg)
-    local color=ImGui.GetColorEx(ctx,UI.marker_tint(base,b.color))
-    ImGui.DrawList_AddRectFilled(layer.draw_list,sx,sy,sx+width,math.max(sy+1,bottom),color,3)
+    if colored_fill then
+      local base=ImGui.GetStyleColor(ctx,ImGui.Col_ChildBg)
+      local color=ImGui.GetColorEx(ctx,UI.marker_tint(base,frame_marker))
+      ImGui.DrawList_AddRectFilled(layer.draw_list,sx,sy,sx+width,
+        math.max(sy+UI_METRICS.marker_fill_min_height,bottom),color,UI_METRICS.marker_fill_rounding)
+    end
+    if selecting and (bulk_selection.selected[b.id] or selection_hovered) then
+      local key=bulk_selection.selected[b.id] and ImGui.Col_HeaderActive or ImGui.Col_HeaderHovered
+      ImGui.DrawList_AddRectFilled(layer.draw_list,sx,sy,sx+width,bottom,
+        placement_alpha(ImGui.GetColor(ctx,key),UI_PALETTE.text_selection_alpha/255),
+        UI_METRICS.selection_rounding)
+    end
+    if frame_marker and not colored_fill then UI.note_marker_strip(frame_marker,sx,sy,bottom,gutter) end
     ImGui.DrawListSplitter_Merge(layer.splitter)
-  elseif b.color then
-    ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),sx+1,sy+2,sx+4,math.max(sy+10,bottom-2),UI.marker_color(b.color),1)
+  elseif frame_marker then
+    UI.note_marker_strip(frame_marker,sx,sy,bottom,gutter)
   end
   if completed then ImGui.PopStyleVar(ctx) end
+  if not selecting then
+    UI.note_drag_handle(tab,column,b,sx,sy,bottom,gutter,first_line_center)
+  end
+  -- The original note remains visibly selected during native DnD. This is
+  -- drawn over this block alone, not around the containing group/section.
+  -- The source becomes known in note_drag_handle(), so paint AFTER it.
+  local dragged=UI.note_drag_current()
+  if dragged and dragged.block==b then
+    UI.note_highlight(sx,sy,width,bottom)
+  end
+  UI.note_bounds[b]={sx,sy,sx+width,bottom}
+  if UI.note_editing(b) then UI.note_edit.rect={sx,sy,sx+width,bottom} end
   -- Open and draw the popup in the block ID scope, after any nested tables.
   if actions_clicked then ImGui.OpenPopup(ctx,'block_actions') end
   -- Test the complete block rectangle without placing an overlay over its
   -- checkbox or dropdown. The window check excludes clipped areas and popups.
-  if not editing and startup_layout_frames>=STARTUP_LAYOUT_FRAMES and ImGui.IsWindowHovered(ctx) then
+  if startup_layout_frames>=STARTUP_LAYOUT_FRAMES and ImGui.IsWindowHovered(ctx) then
     local mx,my=ImGui.GetMousePos(ctx)
     if mx>=sx and mx<sx+width and my>=sy and my<bottom and ImGui.IsMouseReleased(ctx,1) then
       ImGui.OpenPopup(ctx,'block_actions')
@@ -2630,164 +4204,845 @@ local function draw_marked_block(tab,column,b,index)
   -- Menus use full opacity and are outside the measured note group.
   if not selecting then block_actions(tab,column,index) end
   ImGui.PopID(ctx)
+  return {block=b,x=sx,y=sy,width=width,bottom=bottom}
 end
-local function column_header(tab,column,index)
-  if bulk_selection and bulk_selection.column==column then selection_toolbar(column);return end
-  local width=ImGui.GetContentRegionAvail(ctx)
-  local layout=UI.quick_access_layout(width)
-  -- Both columns have explicit initial sizing. A new table must not infer
-  -- its text width from the previous frame's (possibly absent) contents.
-  local table_open=layout.inline and ImGui.BeginTable(ctx,'column_header',2,
-    ImGui.TableFlags_SizingStretchSame|ImGui.TableFlags_NoSavedSettings,width)
-  if not layout.inline or table_open then
-    if table_open then
-      ImGui.TableSetupColumn(ctx,'Name',ImGui.TableColumnFlags_WidthStretch,1)
-      ImGui.TableSetupColumn(ctx,'Controls',ImGui.TableColumnFlags_WidthFixed,layout.width)
-      ImGui.TableNextRow(ctx); ImGui.TableNextColumn(ctx)
-    end
-    ImGui.TextWrapped(ctx,column.name)
-    if UI.double_click_released('rename_column_'..column.id,ImGui.IsItemHovered(ctx)) then
-      request_modal({kind='rename_column',title='Rename column',target=column,value=column.name})
-    end
-    if table_open then ImGui.TableNextColumn(ctx) end
-    -- Submit the same controls/placeholders so switching modes preserves layout.
-    local row={width=layout.inline and layout.width or width,used=0}
-    for _,action in ipairs({
-      {id='text',caption='Text',kind='text'},
-      {id='note',caption='Note with checkbox',kind='note'},
-      {id='dropdown',caption='Dropdown',kind='select'},
-      {id='import',caption='Import text...',kind='import'},
-    }) do
-      UI.quick_access_next(row,layout.side)
-      if editing then
-        if UI.quick_access_button(action.id,action.caption,action.kind,layout.side) then
-          if action.kind=='import' then import_dialog(column)
-          else add_block(action.kind,column) end
-        end
-      else ImGui.Dummy(ctx,layout.side,layout.side) end
-    end
-    UI.quick_access_next(row,layout.menu_width)
-    if editing then
-      if UI.button(ctx,ui_label('...##column'),true) then ImGui.OpenPopup(ctx,'column_actions') end
-      if begin_action_popup('column_actions') then
-        if ImGui.MenuItem(ctx,ui_label('Select elements...'),nil,false,#column.blocks>0) then start_selection(tab,column) end
-        ImGui.Separator(ctx)
-        if ImGui.MenuItem(ctx,ui_label('Rename column...')) then
-          request_modal({kind='rename_column',title='Rename column',target=column,value=column.name})
-        end
-        if ImGui.MenuItem(ctx,ui_label('Move column left'),nil,false,index>1) then
-          session.pending=function() M.move(tab.columns,index,-1); touch(nil,'move_column') end
-        end
-        if ImGui.MenuItem(ctx,ui_label('Move column right'),nil,false,index<#tab.columns) then
-          session.pending=function() M.move(tab.columns,index,1); touch(nil,'move_column') end
-        end
-        if ImGui.MenuItem(ctx,ui_label('Delete column...'),nil,false,#tab.columns>1) then
-          confirm_delete(function() table.remove(tab.columns,index); touch() end,'column')
-        end
-        ImGui.EndPopup(ctx)
-      end
-    else
-      ImGui.Dummy(ctx,layout.menu_width,layout.menu_height)
-    end
-    if table_open then ImGui.EndTable(ctx) end
+-- One native row contains the existing note and separator, including the
+-- space where its insertion line appears. It adds no overlay or dummy row.
+-- Only the source row can inherit the active grip ID; it is never a target.
+function UI.note_row(tab,column,block,index,actions_right)
+  ImGui.BeginGroup(ctx)
+  local rect=draw_marked_block(tab,column,block,index,actions_right)
+  -- The note's measured bottom is the single spacing anchor. Native item
+  -- gaps do not accumulate here; one preference controls both sides of the line.
+  ImGui.SetCursorScreenPos(ctx,rect.x,rect.bottom)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,0,0)
+  UI.note_separator(actions_right,note_spacing)
+  ImGui.EndGroup(ctx)
+  ImGui.PopStyleVar(ctx)
+  UI.note_drop_row(column,block,rect.x,rect.y,rect.width,rect.bottom)
+  return rect
+end
+-- Native drag-and-drop owns mouse capture and delivery. UI state binds its
+-- short token to the current owner and document; only delivery mutates notes.
+function UI.note_drag_current()
+  local drag=UI.note_drag
+  if not drag or UI.drag_cancelled or drag.owner~=session or drag.epoch~=epoch
+      or not session or session.doc~=drag.doc or session.error or session.conflict
+      or modal or tab_rename or UI.info or UI.place or bulk_selection or history_request or escape_pressed
+      or startup_layout_frames<STARTUP_LAYOUT_FRAMES or not M.visible(drag.block,hide_completed) then return nil end
+  return drag
+end
+function UI.note_drag_update()
+  if UI.drag_cancelled and not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0) then UI.drag_cancelled=nil end
+  if not UI.note_drag then return end
+  local drag=UI.note_drag_current()
+  local active,kind,token=ImGui.GetDragDropPayload(ctx)
+  local column
+  if drag then local tab;tab,column=M.note_location(drag.doc,drag.block) end
+  -- The native payload may be absent until this frame's source is submitted.
+  -- Keep a valid drag through that gap and the mouse-release delivery frame.
+  local ended=not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0)
+  if not drag or column~=drag.column or (active and (kind~='P34_NOTE' or token~=drag.token))
+      or (not active and ended) then
+    UI.note_drag=nil;UI.drag_cancelled=true
   end
-  ImGui.Separator(ctx)
 end
-local function draw_columns(tab)
-  local width,height=ImGui.GetContentRegionAvail(ctx)
-  -- Stretch columns share the actual viewport. Native resizers redistribute
-  -- neighboring weights; do not force an inner canvas or minimum pixel widths.
-  local flags=ImGui.TableFlags_Resizable|ImGui.TableFlags_SizingStretchSame|ImGui.TableFlags_BordersInnerV|ImGui.TableFlags_NoSavedSettings
-  local table_height=math.max(120,height-4)
-  if ImGui.BeginTable(ctx,'columns'..tab.id,#tab.columns,flags,width,table_height) then
-    for _,column in ipairs(tab.columns) do
-      ImGui.TableSetupColumn(ctx,'##column'..column.id,ImGui.TableColumnFlags_WidthStretch,1)
+function UI.draw_note_grip(draw_list,cx,cy,width,height,color)
+  local m=UI_METRICS
+  local side=math.max(0,math.min(m.drag_handle_icon_size,width,height))
+  local radius=math.min(m.drag_handle_dot_radius,side/6)
+  local pitch=math.min(m.drag_handle_dot_pitch,math.max(0,(side-2*radius)*0.5))
+  if radius<=0 or pitch<=0 then return end
+  for row=-1,1 do
+    for column=0,1 do
+      ImGui.DrawList_AddCircleFilled(draw_list,cx+(column-0.5)*pitch,
+        cy+row*pitch,radius,color)
     end
-    ImGui.TableNextRow(ctx)
-    for index,column in ipairs(tab.columns) do
-      ImGui.TableNextColumn(ctx)
-      ImGui.PushID(ctx,column.id)
-      -- A fixed height derived from the outer viewport avoids circular table/child sizing.
-      if ImGui.BeginChild(ctx,'column_body',0,math.max(40,table_height-8),ImGui.ChildFlags_Borders) then
-        column_header(tab,column,index)
-        ImGui.PushFont(ctx,font,size)
-        if #column.blocks==0 then ImGui.TextDisabled(ctx,tr('Empty column')) end
-        local shown=0
-        -- Snapshot the order before drawing: toggling a checkbox must not
-        -- submit the same block twice or skip a neighbor in this frame.
-        for _,i in ipairs(M.display_order(column,hide_completed,completed_last)) do
-          local b=column.blocks[i]
-          if M.visible(b,hide_completed) then
-            shown=shown+1
-            draw_marked_block(tab,column,b,i)
-            -- Keep section boundaries without redundant empty rows.
-            ImGui.Separator(ctx)
+  end
+end
+function UI.note_drag_handle(tab,column,block,sx,sy,bottom,gutter,first_line_center)
+  if bulk_selection then return end
+  local save_x,save_y=ImGui.GetCursorScreenPos(ctx)
+  local m=UI_METRICS
+  gutter=gutter or UI.note_gutter(ImGui.GetContentRegionAvail(ctx))
+  local offset=math.min(gutter,math.max(m.drag_handle_offset_x,m.marker_strip_offset_x+m.marker_strip_width))
+  local width=math.min(m.drag_handle_width,math.max(0,gutter-offset-m.note_gutter_end_gap))
+  local center=first_line_center or (sy+ImGui.GetTextLineHeight(ctx)*0.5)
+  local height=math.max(1,math.min(m.drag_handle_max_height,bottom-sy))
+  -- Both the hitbox and the six visible dots use the first-line center.
+  -- No vertical correction or image-alpha rectangle participates in alignment.
+  local offset_y=center-sy-height*0.5
+  if width<=0 then return end
+  local hx,hy=sx+offset,sy+offset_y
+  ImGui.SetCursorScreenPos(ctx,hx,hy)
+  ImGui.InvisibleButton(ctx,'##drag_note',width,height,ImGui.ButtonFlags_MouseButtonLeft)
+  local color=ImGui.GetColor(ctx,ImGui.Col_TextDisabled)
+  UI.draw_note_grip(ImGui.GetWindowDrawList(ctx),hx+width*0.5,center,width,height,color)
+  ImGui.SetItemTooltip(ctx,tr('Drag to move note'))
+  if not UI.drag_cancelled and not escape_pressed and not modal and not tab_rename and not UI.info and not history_request
+      and startup_layout_frames>=STARTUP_LAYOUT_FRAMES and ImGui.BeginDragDropSource(ctx,0) then
+    local drag=UI.note_drag_current()
+    if not drag or drag.block~=block then
+      UI.drag_sequence=(UI.drag_sequence or 0)+1
+      drag={owner=session,epoch=epoch,doc=session.doc,column=column,block=block,
+        token=tostring(epoch)..':'..tostring(block.id)..':'..UI.drag_sequence}
+      UI.end_note_edit()
+      UI.note_drag=drag;UI.double_press=nil;UI.tab_press=nil
+      session.history.key=nil;session.input_state=nil;undo_boundary=true
+    end
+    ImGui.SetDragDropPayload(ctx,'P34_NOTE',drag.token,ImGui.Cond_Once)
+    ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
+    local caption=(block.text or block.label or ''):match('([^\n]*)') or ''
+    -- Drag source tooltip auto-sizes. TextWrapped has no stable wrap width
+    -- there and could create a one-character-wide vertical column of text.
+    local pos,chars=0,0
+    while pos<#caption and chars<UI_METRICS.drag_preview_max_chars do pos=M.editor_next(caption,pos);chars=chars+1 end
+    if pos<#caption then caption=caption:sub(1,pos)..'…' end
+    ImGui.Text(ctx,caption~='' and caption or tr('(Empty text block)'))
+    ImGui.PopFont(ctx)
+    ImGui.EndDragDropSource(ctx)
+  end
+  ImGui.SetCursorScreenPos(ctx,save_x,save_y)
+  ImGui.Dummy(ctx,0,0)
+end
+function UI.note_delete_drop(drag)
+  if session.pending or not UI.note_drag_current() or UI.note_drag~=drag then return end
+  local owner,doc,generation,block=session,session.doc,epoch,drag.block
+  session.pending=function()
+    if session~=owner or session.doc~=doc or epoch~=generation
+        or not api.valid(owner.target) then return end
+    local _,column=M.note_location(doc,block)
+    if not column then return end
+    UI.note_drag=nil
+    UI.drag_cancelled=true
+    confirm_delete(function()
+      -- Re-resolve membership after the confirmation, not on mouse release.
+      if session~=owner or session.doc~=doc or not api.valid(owner.target) then return end
+      local _,target,index=M.note_location(doc,block)
+      if target and index then
+        table.remove(target.blocks,index)
+        UI.new_input=nil;owner.history.key=nil;owner.input_state=nil
+        touch(nil,'delete_note')
+      end
+    end,'note')
+  end
+end
+function UI.note_drop_commit(drag,target,anchor,after)
+  if session.pending or not UI.note_drag_current() or UI.note_drag~=drag then return end
+  local owner,doc,generation=session,session.doc,epoch
+  session.pending=function()
+    -- Re-resolve pointer membership after all widgets have been submitted.
+    if session==owner and session.doc==doc and epoch==generation and UI.note_drag_current()==drag
+        and api.valid(session.target) then
+      local moved,tab,index=M.note_move(doc,drag.block,target,anchor,after,completed_last,hide_completed)
+      if moved then
+        target.folded=false;tab.folded=false;session.active=index;force_tab=tab.id
+        UI.new_input=nil;session.history.key=nil;session.input_state=nil
+        touch(nil,'move_note');undo_boundary=true
+      end
+    end
+    UI.note_drag=nil
+  end
+end
+-- Consume delivery from an already submitted native item. Both note rows
+-- and section fallback targets share this owner/token/plan validation.
+function UI.note_drop_item(column,anchor,after,line_y,span)
+  local drag=UI.note_drag_current()
+  if not drag then return end
+  if not M.note_drop_plan(drag.doc,drag.block,column,anchor,after,
+      completed_last,hide_completed) then return end
+  if ImGui.BeginDragDropTarget(ctx) then
+    local flags=ImGui.DragDropFlags_AcceptBeforeDelivery|ImGui.DragDropFlags_AcceptNoDrawDefaultRect
+    local accepted,token=ImGui.AcceptDragDropPayload(ctx,'P34_NOTE',nil,flags)
+    local active,kind,payload,preview,delivery=ImGui.GetDragDropPayload(ctx)
+    if accepted and active and kind=='P34_NOTE' and token==drag.token and payload==drag.token then
+      if preview and line_y and span then
+        -- The native target includes its group heading. The insertion line
+        -- follows the already measured NOTE shell and separator guide.
+        local min_x=span.x
+        local max_x=min_x+span.width-UI_METRICS.note_separator_right_inset
+        local color=ImGui.GetColor(ctx,ImGui.Col_CheckMark)
+        if max_x>min_x then
+          ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx),min_x,line_y,
+            max_x,line_y,color,UI_METRICS.drop_line_thickness)
+        end
+      end
+      if delivery then UI.note_drop_commit(drag,column,anchor,after) end
+    end
+    ImGui.EndDragDropTarget(ctx)
+  end
+end
+-- EndGroup forwards an active child's ID. A whole source section therefore
+-- has the source ID and BeginDragDropTarget rejects it. Accept same-section
+-- reordering on the existing neighboring rows; never on the source row.
+function UI.note_drop_row(column,block,sx,sy,width,bottom)
+  local drag=UI.note_drag_current()
+  if not drag or drag.column~=column or drag.block==block then return end
+  local _,my=ImGui.GetMousePos(ctx)
+  local after=my>=(sy+bottom)*0.5
+  UI.note_drop_item(column,block,after,after and bottom+2 or sy,{x=sx,width=width})
+end
+-- Section fallback retains all N+1 boundaries for transfers between groups,
+-- including empty destinations. No extra items or overlay hitboxes are added.
+function UI.note_drop_section(column,rects)
+  local drag=UI.note_drag_current()
+  if not drag or drag.column==column then return end
+  local anchor,after,line_y
+  if #rects>0 then
+    local _,my=ImGui.GetMousePos(ctx)
+    anchor,after,line_y=M.note_insertion_slot(rects,my)
+  end
+  UI.note_drop_item(column,anchor,after,line_y,rects[1])
+end
+-- The minimized-column restore button is an existing native widget.
+-- Drop directly onto that widget, never create a second overlay item.
+function UI.note_drop_target(column)
+  local drag=UI.note_drag_current()
+  if not drag or not M.note_drop_plan(drag.doc,drag.block,column,nil,false,
+      completed_last,hide_completed) then return end
+  if ImGui.BeginDragDropTarget(ctx) then
+    local flags=ImGui.DragDropFlags_AcceptBeforeDelivery|ImGui.DragDropFlags_AcceptNoDrawDefaultRect
+    local accepted,token=ImGui.AcceptDragDropPayload(ctx,'P34_NOTE',nil,flags)
+    local active,kind,payload,_,delivery=ImGui.GetDragDropPayload(ctx)
+    if accepted and active and kind=='P34_NOTE' and token==drag.token and payload==drag.token and delivery then
+      UI.note_drop_commit(drag,column,nil,false)
+    end
+    ImGui.EndDragDropTarget(ctx)
+  end
+end
+function UI.note_drag_tab(tab,hovered)
+  local drag=UI.note_drag_current()
+  if not drag then return end
+  if hovered then
+    local now=reaper.time_precise()
+    if drag.hover_tab~=tab then drag.hover_tab=tab;drag.hover_since=now end
+    if now-drag.hover_since>=0.45 and session.doc.tabs[session.active]~=tab then force_tab=tab.id end
+  elseif drag.hover_tab==tab then drag.hover_tab=nil;drag.hover_since=nil end
+end
+function UI.note_drag_scroll()
+  local drag=(UI.place_valid(UI.place) and UI.place.mode=='drag') and UI.place or UI.note_drag_current()
+  if not drag or not ImGui.IsWindowHovered(ctx,ImGui.HoveredFlags_ChildWindows|ImGui.HoveredFlags_AllowWhenBlockedByActiveItem) then return end
+  local x,y=ImGui.GetWindowPos(ctx)
+  local width,height=ImGui.GetWindowSize(ctx)
+  local mx,my=ImGui.GetMousePos(ctx)
+  if mx<x or mx>x+width or my<y or my>y+height then return end
+  local now=reaper.time_precise()
+  local dt=math.min(0.05,math.max(0,now-(drag.scroll_time or now-1/60)))
+  drag.scroll_time=now
+  local edge=math.min(36,height*0.2)
+  local step=my<y+edge and -(y+edge-my)/edge or my>y+height-edge and (my-y-height+edge)/edge or 0
+  if step~=0 then
+    local maximum=ImGui.GetScrollMaxY(ctx)
+    ImGui.SetScrollY(ctx,math.max(0,math.min(maximum,ImGui.GetScrollY(ctx)+step*360*dt)))
+  end
+end
+
+-- Right-side geometry is shared by column headings, tab headings and
+-- note tables. All are children with different native padding, so deriving
+-- each action edge from GetContentRegionAvail() creates visible misalignment.
+-- Compute the thumb's bounds exactly as the overlay renderer does, and keep
+-- the shared action line to its left. No interactive overlay is added.
+function UI.overlay_scroll_bounds(window_right,pad_x)
+  local m=UI_METRICS
+  local right=window_right-math.min(pad_x,m.overlay_scroll_inset)
+  local left=math.max(window_right-pad_x,right-m.overlay_scroll_width)
+  return left,right
+end
+function UI.board_actions_edge(body_window_right,pad_x)
+  local scroll_left=UI.overlay_scroll_bounds(body_window_right,pad_x)
+  local m=UI_METRICS
+  return math.min(body_window_right-pad_x,scroll_left-m.action_to_scroll_gap)-m.action_right_inset
+end
+-- A fixed-width separator uses the same right guide as the note/menu buttons.
+-- The native Separator() stretches to a different content edge after Indent()
+-- and may overflow into the overlay scrollbar's track.
+function UI.note_separator(right,gap)
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  local m=UI_METRICS
+  local end_x=math.max(sx,math.min(right-m.note_separator_right_inset,
+    sx+ImGui.GetContentRegionAvail(ctx)))
+  if end_x>sx then
+    local line_y=gap~=nil and sy+gap+0.5 or sy-m.note_separator_raise+0.5
+    ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx),sx,line_y,end_x,line_y,
+      ImGui.GetColor(ctx,ImGui.Col_Separator),m.note_separator_thickness)
+  end
+  -- A single native item reserves the line and both adjustable gaps. Other
+  -- separator uses retain their pre-existing geometry when gap is absent.
+  ImGui.Dummy(ctx,0,gap~=nil and 2*gap+m.note_separator_height or m.note_separator_height)
+end
+
+-- Thin, draggable scrollbar thumb drawn over the note viewport. The native
+-- scrollbar is hidden (without disabling mouse-wheel scrolling), so ImGui
+-- never reserves a changing right-hand gutter. There is no extra widget,
+-- cursor repositioning or BeginGroup manipulation. Keep the entire hit zone
+-- in the existing window padding, outside the rightmost note-action button.
+function UI.overlay_scroll_thumb(board)
+  local drag=UI.overlay_scroll_drag
+  if drag and (not ImGui.IsMouseDown(ctx,0) or drag.owner~=session or drag.epoch~=epoch) then
+    UI.overlay_scroll_drag=nil
+    drag=nil
+  end
+  local max_scroll=ImGui.GetScrollMaxY(ctx)
+  if max_scroll<=1 then
+    if drag and drag.board==board then UI.overlay_scroll_drag=nil end
+    return
+  end
+  local wx,wy=ImGui.GetWindowPos(ctx)
+  local ww,wh=ImGui.GetWindowSize(ctx)
+  local m=UI_METRICS
+  local top=wy+m.overlay_scroll_margin
+  local track_h=wh-2*m.overlay_scroll_margin
+  if track_h<m.overlay_scroll_min_track_height then return end
+  local thumb_h=math.max(m.overlay_scroll_min_thumb_height,
+    track_h*wh/(wh+max_scroll))
+  thumb_h=math.min(thumb_h,track_h)
+  local travel=track_h-thumb_h
+  local scroll=math.max(0,math.min(max_scroll,ImGui.GetScrollY(ctx)))
+  local thumb_y=top+(travel>0 and travel*scroll/max_scroll or 0)
+  local pad_x=ImGui.GetStyleVar(ctx,ImGui.StyleVar_WindowPadding)
+  local left,right=UI.overlay_scroll_bounds(wx+ww,pad_x)
+  if right<=left then return end
+  local hit_left=math.max(wx+ww-pad_x,left-m.overlay_scroll_hit_pad_left)
+  local hit_right=math.min(wx+ww,right+m.overlay_scroll_hit_pad_right)
+  local mx,my=ImGui.GetMousePos(ctx)
+  local on_thumb=mx>=hit_left and mx<=hit_right and my>=thumb_y and my<=thumb_y+thumb_h
+  local active=drag and drag.board==board
+  if not active and not UI.place and not UI.note_drag_current()
+      and startup_layout_frames>=STARTUP_LAYOUT_FRAMES
+      and ImGui.IsWindowHovered(ctx) and on_thumb and ImGui.IsMouseClicked(ctx,0) then
+    UI.overlay_scroll_drag={owner=session,epoch=epoch,board=board,offset=my-thumb_y}
+    active=true
+  end
+  if active and ImGui.IsMouseDown(ctx,0) and travel>0 then
+    local offset=UI.overlay_scroll_drag.offset
+    local ratio=math.max(0,math.min(1,(my-offset-top)/travel))
+    ImGui.SetScrollY(ctx,ratio*max_scroll)
+  end
+  local color=ImGui.GetColorEx(ctx,themes[theme].viewer[
+    active and 'C_SCROLL_A' or on_thumb and 'C_SCROLL_H' or 'C_SCROLL'])
+  local dl=ImGui.GetWindowDrawList(ctx)
+  ImGui.DrawList_AddRectFilled(dl,left,thumb_y,right,thumb_y+thumb_h,color,
+    m.overlay_scroll_width*0.5)
+end
+
+function UI.column_node(column)
+  -- TreeNodeEx draws the native disclosure arrow at the current font size.
+  -- This size affects only the arrow, not the note text or the trailing menu.
+  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size+UI_METRICS.tab_arrow_extra_px)
+  ImGui.SetNextItemOpen(ctx,not column.folded,ImGui.Cond_Always)
+  local mouse=ImGui.IsMouseDown(ctx,0) or ImGui.IsMouseReleased(ctx,0)
+  if mouse then
+    ImGui.PushStyleVar(ctx,ImGui.StyleVar_DisabledAlpha,1);ImGui.BeginDisabled(ctx,true)
+  end
+  -- Keep the native arrow hit-box narrow: the title and the trailing menu
+  -- are separately submitted items. The whole arrow+title hover background
+  -- is painted by column_header without changing any ImGui hit boxes.
+  ImGui.PushStyleColor(ctx,ImGui.Col_HeaderHovered,0x00000000)
+  local open=ImGui.TreeNodeEx(ctx,'column_fold','',
+    ImGui.TreeNodeFlags_NoTreePushOnOpen|ImGui.TreeNodeFlags_FramePadding|ImGui.TreeNodeFlags_SpanLabelWidth)
+  ImGui.PopStyleColor(ctx)
+  local toggled=not mouse and ImGui.IsItemToggledOpen(ctx)
+  local hovered=ImGui.IsItemHovered(ctx,mouse and ImGui.HoveredFlags_AllowWhenDisabled or 0)
+  if mouse then ImGui.EndDisabled(ctx);ImGui.PopStyleVar(ctx) end
+  ImGui.PopFont(ctx)
+  if startup_layout_frames>=STARTUP_LAYOUT_FRAMES then
+    if hovered and ImGui.IsMouseClicked(ctx,0) then UI.column_press={column=column,owner=session,epoch=epoch} end
+    local press=UI.column_press
+    if ImGui.IsMouseReleased(ctx,0) and press and press.column==column then
+      UI.column_press=nil
+      if hovered and press.owner==session and press.epoch==epoch then open=column.folded==true;toggled=true end
+    end
+    if toggled and open==(column.folded==true) then
+      column.folded=not open
+      if UI.note_edit and UI.note_edit.column==column then UI.end_note_edit() end
+      if bulk_selection and bulk_selection.column==column then bulk_selection=nil end
+      session.history.key=nil;session.input_state=nil;undo_boundary=true
+    end
+  end
+end
+-- Public columns contain independently collapsible vertical tabs. Internal
+-- tab/column field names are retained for storage/history helper compatibility.
+function UI.add_section(board,after)
+  if session.pending then return end
+  local owner,doc,generation=session,session.doc,epoch
+  session.pending=function()
+    if session~=owner or session.doc~=doc or epoch~=generation then return end
+    for bi,candidate in ipairs(doc.tabs) do
+      if candidate==board then
+        for i,section in ipairs(board.columns) do
+          if section==after then
+            local created=M.column(tr('Group')..' '..(#board.columns+1))
+            table.insert(board.columns,i+1,created);session.active_group_id=created.id
+            session.active=bi;touch(nil,'add_group');undo_boundary=true;return
           end
         end
-        if shown==0 and #column.blocks>0 then ImGui.TextDisabled(ctx,tr('Completed items hidden')) end
-        ImGui.PopFont(ctx)
-        ImGui.EndChild(ctx)
       end
-      ImGui.PopID(ctx)
     end
-    ImGui.EndTable(ctx)
   end
 end
-local function draw_document()
-  local requested_tab=force_tab;force_tab=nil
-  if ImGui.BeginTabBar(ctx,'notes_tabs',ImGui.TabBarFlags_FittingPolicyScroll) then
-    for index,tab in ipairs(session.doc.tabs) do
-      local flags=requested_tab==tab.id and ImGui.TabItemFlags_SetSelected or 0
-      local renaming=tab_rename and tab_rename.target==tab
-      -- Keep the tab's ID and selection while reserving space for its inline input.
-      local caption=renaming and string.rep(' ',40) or label(tab.name)
-      local tab_visible,tab_hovered=UI.release_tab_item(caption..'###tab'..tab.id,tab.id,flags)
-      local tab_right_clicked=tab_hovered and ImGui.IsMouseReleased(ctx,1)
-      if not renaming and UI.double_click_released('tab_double_'..tab.id,tab_hovered) then
-        begin_tab_rename(tab)
-      end
-      -- Capture the tab rectangle before child widgets replace the last-item data.
-      if tab_visible and tab_rename and tab_rename.target==tab and ImGui.IsItemVisible(ctx) then
-        local x1,y1=ImGui.GetItemRectMin(ctx)
-        local x2,y2=ImGui.GetItemRectMax(ctx)
-        -- Submit the overlay while the cursor is still above the columns.
-        -- Restoring it after the full-height table extended the parent by a row.
-        draw_tab_rename({x1,y1,x2,y2})
-      end
-      local context_id='tab_context'..tab.id
-      if tab_right_clicked then ImGui.OpenPopup(ctx,context_id) end
-      if begin_action_popup(context_id) then
-        if ImGui.MenuItem(ctx,ui_label('Delete tab...'),nil,false,#session.doc.tabs>1) then
-          confirm_tab_delete(tab)
+-- Headings register a clipped, single-line native item. Long user names do
+-- not extend the layout or wrap into vertical text in narrow columns.
+function UI.heading_text(text,width,height,show_tooltip)
+  width=math.max(0,width)
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  ImGui.Dummy(ctx,width,height)
+  if width>0 then
+    local color=ImGui.GetColor(ctx,ImGui.Col_Text)
+    local shown=text:gsub('[\r\n]',' ')
+    local line_h=ImGui.GetTextLineHeight(ctx)
+    ImGui.PushClipRect(ctx,sx,sy,sx+width,sy+height,true)
+    ImGui.DrawList_AddText(ImGui.GetWindowDrawList(ctx),sx,sy+(height-line_h)*0.5,color,shown)
+    ImGui.PopClipRect(ctx)
+  end
+  local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+  if show_tooltip~=false then ImGui.SetItemTooltip(ctx,text) end
+  return hovered
+end
+-- Group actions are plain dots; the invisible native item keeps a stable
+-- mouse/keyboard hitbox without showing a framed button.  All three circles
+-- are drawn in the current font-independent UI coordinate system.
+function UI.group_menu_dots(width,height)
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  local clicked=ImGui.InvisibleButton(ctx,'##section_actions_dots',math.max(1,width),math.max(1,height),
+    ImGui.ButtonFlags_MouseButtonLeft|ImGui.ButtonFlags_EnableNav)
+  local m=UI_METRICS
+  local radius=math.max(0.5,math.min(m.group_menu_dot_radius,height*0.25,width/8))
+  local spacing=math.max(2*radius+1,math.min(m.group_menu_dot_spacing,(width-2*radius)*0.5))
+  -- Keep all three dots inside the hitbox even in a narrow Docker.
+  local max_left_shift=math.max(0,width*0.5-spacing-radius-1)
+  local cx,cy=sx+width*0.5-math.min(m.group_menu_dots_right_inset,max_left_shift),sy+height*0.5
+  local color=ImGui.GetColor(ctx,ImGui.Col_Text)
+  local dl=ImGui.GetWindowDrawList(ctx)
+  for i=-1,1 do
+    ImGui.DrawList_AddCircleFilled(dl,cx+i*spacing,cy,radius,color,12)
+  end
+  return clicked
+end
+local function column_header(board,section,index,actions_right)
+  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
+  if bulk_selection and bulk_selection.column==section then
+    selection_toolbar(section,actions_right);ImGui.PopFont(ctx);return
+  end
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  local content_w=ImGui.GetContentRegionAvail(ctx)
+  -- The section body uses an overlay scrollbar without a native gutter.
+  -- Use the same absolute button edge in both child windows.
+  -- A single right edge for heading background, title, and trailing menu.
+  -- Keep the optional inset in the layout itself, not only in the drawing.
+  local width=math.max(1,math.min(content_w,actions_right-sx)-UI_METRICS.group_header_right_inset)
+  local heading_right=sx+width
+  local menu_w,height=UI.button_size('...')
+  local gap=UI_METRICS.tab_heading_menu_gap
+  local min_title=UI_METRICS.tab_heading_min_title
+  -- Paint backgrounds BEFORE the native disclosure arrow and the text;
+  -- otherwise the later draw-list rectangles cover their foreground pixels.
+  -- Backgrounds have no ImGui hitboxes.
+  if section.header_color then
+    local tint_amount=theme=='dark' and UI_METRICS.group_header_tint_dark or UI_METRICS.group_header_tint_light
+    local fill=UI.marker_tint(themes[theme].paper,section.header_color,tint_amount)
+    ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),sx,sy,
+      heading_right,sy+math.max(height,UI_METRICS.group_header_min_height),
+      ImGui.GetColorEx(ctx,fill),UI_METRICS.button_rounding)
+  end
+  -- The hover background now covers the whole group header, including
+  -- the reserved trailing-menu rectangle. It is draw-only, behind the items:
+  -- no new hitboxes, no changed click/drag semantics and no layout row.
+  local mx,my=ImGui.GetMousePos(ctx)
+  local heading_hovered=ImGui.IsWindowHovered(ctx) and mx>=sx and mx<heading_right
+      and my>=sy and my<sy+height and not UI.place and not UI.note_drag_current()
+  if heading_hovered and (ImGui.IsMouseClicked(ctx,0) or ImGui.IsMouseClicked(ctx,1)) then
+    session.active_group_id=section.id
+  end
+  if heading_hovered and heading_right>sx then
+    local hover_color=ImGui.GetColor(ctx,ImGui.Col_HeaderHovered)
+    ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),
+      sx,sy,heading_right,sy+height,placement_alpha(hover_color,UI_METRICS.tab_heading_hover_alpha),UI_METRICS.button_rounding)
+  end
+  ImGui.BeginGroup(ctx)
+  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size+UI_METRICS.tab_arrow_extra_px)
+  local arrow_line_h=ImGui.GetTextLineHeight(ctx)
+  ImGui.PopFont(ctx)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,UI_METRICS.frame_pad_x,
+    math.max(0,(height-arrow_line_h)*0.5))
+  UI.column_node(section)
+  ImGui.PopStyleVar(ctx)
+  local arrow_hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+  ImGui.SameLine(ctx,0,UI_METRICS.tab_heading_arrow_text_gap)
+  local text_x=ImGui.GetCursorScreenPos(ctx)
+  local available=math.max(0,width-(text_x-sx))
+  local show_menu=available>=min_title+gap+menu_w
+  local title_w=math.max(0,available-(show_menu and gap+menu_w or 0))
+  ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size+UI_METRICS.tab_heading_extra_px)
+  local title_hovered=UI.heading_text(section.name,title_w,height,false)
+  ImGui.PopFont(ctx)
+  if show_menu then
+    ImGui.SameLine(ctx,0,gap)
+    local mx,my=ImGui.GetMousePos(ctx)
+    local header_hover=ImGui.IsWindowHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+      and mx>=sx and mx<heading_right and my>=sy and my<sy+height
+    if header_hover or ImGui.IsPopupOpen(ctx,'section_actions') then
+      if UI.group_menu_dots(menu_w,height) then ImGui.OpenPopup(ctx,'section_actions') end
+    else
+      ImGui.Dummy(ctx,menu_w,height)
+    end
+  end
+  ImGui.EndGroup(ctx)
+  local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+  UI.section_hover(section,hovered or title_hovered or arrow_hovered)
+  if UI.double_click_released('rename_section_'..section.id,title_hovered) then
+    request_modal({kind='rename_column',title='Rename group',target=section,value=section.name})
+  end
+  if ImGui.IsMouseReleased(ctx,1) and hovered then ImGui.OpenPopup(ctx,'section_actions') end
+  if begin_action_popup('section_actions') then
+    if ImGui.MenuItem(ctx,ui_label('New group below')) then UI.add_section(board,section) end
+    ImGui.Separator(ctx)
+    if ImGui.MenuItem(ctx,ui_label('Select elements...'),nil,false,#section.blocks>0) then start_selection(board,section) end
+    if ImGui.MenuItem(ctx,ui_label('Rename')) then
+      request_modal({kind='rename_column',title='Rename group',target=section,value=section.name})
+    end
+    if ImGui.BeginMenu(ctx,ui_label('Group header color')) then
+      marker_menu(section.header_color,function(key)
+        if section.header_color~=key then
+          section.header_color=key;touch(nil,'group_color');undo_boundary=true
         end
-        ImGui.EndPopup(ctx)
+      end,'No color','group_')
+      ImGui.EndMenu(ctx)
+    end
+    if ImGui.MenuItem(ctx,ui_label('Move up'),nil,false,index>1) then
+      session.pending=function()M.move(board.columns,index,-1);touch(nil,'move_group')end
+    end
+    if ImGui.MenuItem(ctx,ui_label('Move down'),nil,false,index<#board.columns) then
+      session.pending=function()M.move(board.columns,index,1);touch(nil,'move_group')end
+    end
+    if ImGui.MenuItem(ctx,ui_label('Delete group...'),nil,false,#board.columns>1) then
+      confirm_delete(function()table.remove(board.columns,index);touch(nil,'delete_group')end,'group')
+    end
+    ImGui.EndPopup(ctx)
+  end
+  ImGui.PopFont(ctx)
+end
+function UI.board_actions(board,index)
+  if ImGui.MenuItem(ctx,ui_label('Rename')) then
+    request_modal({kind='rename_column',title='Rename tab',target=board,value=board.name})
+  end
+  if ImGui.MenuItem(ctx,ui_label('Move left'),nil,false,index>1) then
+    UI.queue_tab_reorder(board.id,session.doc.tabs[index-1].id)
+  end
+  if ImGui.MenuItem(ctx,ui_label('Move right'),nil,false,index<#session.doc.tabs) then
+    UI.queue_tab_reorder(board.id,session.doc.tabs[index+2] and session.doc.tabs[index+2].id)
+  end
+  if ImGui.MenuItem(ctx,ui_label('Delete tab...'),nil,false,#session.doc.tabs>1) then
+    confirm_tab_delete(board)
+  end
+end
+
+
+-- Each outer model tab is one horizontal page. Its nested columns remain
+-- independent, collapsible groups. Internal names are intentionally retained
+-- to read older v1/v2 project notes and preserve history helpers.
+-- Tab gestures use their own state, never the note/creation payload types.
+function UI.queue_tab_reorder(id,before)
+  if session.pending then return end
+  local owner,doc,generation=session,session.doc,epoch
+  session.pending=function()
+    if session~=owner or session.doc~=doc or epoch~=generation
+        or not api.valid(owner.target) then return end
+    local moved
+    session.active,moved=M.reorder_tab(doc,id,before,session.active)
+    if moved then touch(nil,'move_tab');undo_boundary=true;bulk_selection=nil end
+  end
+end
+function UI.tab_gesture_valid(press)
+  return press and press.owner==session and press.doc==session.doc and press.epoch==epoch
+    and not session.error and not session.conflict and not modal and not tab_rename
+    and not UI.info and not UI.place and not bulk_selection and not history_request
+    and not escape_pressed and not UI.note_drag_current()
+    and startup_layout_frames>=STARTUP_LAYOUT_FRAMES
+end
+function UI.tab_reorder_target(rects,mx,my,left,top,width,height,hovered)
+  if not hovered or mx<left or mx>=left+width or my<top or my>=top+height then return nil end
+  for _,r in ipairs(rects) do
+    if mx<r.x+r.width*0.5 then return {before=r.id,x=r.x} end
+  end
+  local last=rects[#rects]
+  if last then return {x=last.x+last.width} end
+end
+function UI.tabs_strip()
+  local m=UI_METRICS
+  if not UI.tab_gesture_valid(UI.tab_gesture) then UI.tab_gesture=nil end
+  local available=math.max(1,ImGui.GetContentRegionAvail(ctx))
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  local side=m.button_min_height
+  local gap=m.tabs_strip_button_gap
+  local pad=m.tabs_strip_pad_x
+  local controls_w=2*side+gap
+  local right_inset=math.min(m.tabs_actions_right_inset,math.max(0,available-controls_w))
+  local strip_h=math.max(m.tabs_strip_height,side+2*m.tabs_strip_pad_y)
+  -- Read the shared action edge, but clamp against the CURRENT window width.
+  -- ReaImGui auto-ends a false BeginChild. End only the true branch;
+  -- otherwise the parent epoch ID is still open when EndChild checks it.
+  local fallback_right=sx+available-right_inset
+  local menu_right=math.min(fallback_right,UI.shared_actions_right or fallback_right)
+  menu_right=math.max(sx+controls_w,menu_right)
+  local list_width=math.max(1,menu_right-sx-controls_w-gap-pad)
+  local label_widths={}
+  local total=0
+  ImGui.PushFont(ctx,heading_bold_font,UI_METRICS.font_size)
+  for index,board in ipairs(session.doc.tabs) do
+    local caption=board.name:gsub('[\r\n]',' ')
+    local tw=ImGui.CalcTextSize(ctx,caption)
+    label_widths[index]=math.max(m.tabs_strip_min_width,tw+2*m.tabs_strip_label_pad_x)
+    total=total+label_widths[index]+(index>1 and m.tabs_strip_gap or 0)
+  end
+  ImGui.PopFont(ctx)
+  local tab_h=strip_h-m.tabs_strip_pad_y*2
+  -- Reserve the native horizontal scrollbar below the labels instead of
+  -- letting it clip their lower half in a narrow docker.
+  if total>list_width then strip_h=strip_h+ImGui.GetStyleVar(ctx,ImGui.StyleVar_ScrollbarSize) end
+  local strip_color=ImGui.GetColorEx(ctx,themes[theme].chrome)
+  ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),
+    sx,sy,sx+available,sy+strip_h,strip_color)
+  -- Start the only child exactly at the visible tab-list position. The popup
+  -- controls below are submitted in the PARENT window's original ID scope.
+  ImGui.SetCursorScreenPos(ctx,sx+pad,sy)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,0,0)
+  ImGui.PushStyleColor(ctx,ImGui.Col_ChildBg,0x00000000)
+  ImGui.SetNextWindowContentSize(ctx,total,0)
+  local visible=ImGui.BeginChild(ctx,'page_tabs',list_width,strip_h,0,
+    ImGui.WindowFlags_HorizontalScrollbar)
+  ImGui.PopStyleColor(ctx);ImGui.PopStyleVar(ctx)
+  if visible then
+    local rects={}
+    local tx,ty=ImGui.GetCursorScreenPos(ctx)
+    local mx,my=ImGui.GetMousePos(ctx)
+    ImGui.SetCursorScreenPos(ctx,tx,ty+m.tabs_strip_pad_y)
+    for index,board in ipairs(session.doc.tabs) do
+      if index>1 then ImGui.SameLine(ctx,0,m.tabs_strip_gap) end
+      local w=label_widths[index]
+      local h=tab_h
+      -- Stable native IDs eliminate an unnecessary PushID/PopID scope.
+      local clicked=ImGui.InvisibleButton(ctx,'##open_page_'..board.id,w,h,
+        ImGui.ButtonFlags_MouseButtonLeft)
+      local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+      local x,y=ImGui.GetItemRectMin(ctx)
+      rects[#rects+1]={id=board.id,x=x,width=w}
+      if ImGui.IsItemActivated(ctx) and UI.tab_gesture_valid({owner=session,doc=session.doc,epoch=epoch}) then
+        local payload=ImGui.GetDragDropPayload(ctx)
+        if not payload then
+          UI.tab_gesture={owner=session,doc=session.doc,epoch=epoch,id=board.id}
+        end
       end
-      if tab_visible then
-        if bulk_selection and bulk_selection.tab_id~=tab.id then bulk_selection=nil end
-        session.active=index
-        draw_columns(tab)
-        ImGui.EndTabItem(ctx)
+      local press=UI.tab_gesture
+      if press and press.id==board.id and ImGui.IsItemActive(ctx)
+          and ImGui.IsMouseDragging(ctx,0,m.tabs_drag_threshold) then
+        if not press.dragging then UI.end_note_edit();UI.double_press=nil end
+        press.dragging=true
+      end
+      local active=session.active==index
+      if hovered or active then
+        local c=ImGui.GetColor(ctx,hovered and ImGui.Col_HeaderHovered or ImGui.Col_Header)
+        ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),x,y,x+w,y+h,
+          placement_alpha(c,hovered and 0.65 or 0.4),m.button_rounding)
+      end
+      if active then
+        local accent=ImGui.GetColor(ctx,ImGui.Col_CheckMark)
+        ImGui.DrawList_AddRectFilled(ImGui.GetWindowDrawList(ctx),x,y+h-m.tabs_strip_active_line,
+          x+w,y+h,accent)
+      end
+      local caption=board.name:gsub('[\r\n]',' ')
+      ImGui.PushFont(ctx,active and heading_bold_font or ui_font,UI_METRICS.font_size)
+      local tw,th=ImGui.CalcTextSize(ctx,caption)
+      ImGui.PushClipRect(ctx,x,y,x+w,y+h,true)
+      ImGui.DrawList_AddText(ImGui.GetWindowDrawList(ctx),x+m.tabs_strip_label_pad_x,
+        y+(h-th)*0.5,ImGui.GetColor(ctx,ImGui.Col_Text),caption)
+      ImGui.PopClipRect(ctx)
+      ImGui.PopFont(ctx)
+      if clicked and not (UI.tab_gesture and UI.tab_gesture.dragging) and not UI.note_drag_current() then
+        UI.end_note_edit();session.active=index;bulk_selection=nil
+      end
+      if hovered then UI.note_drag_tab(board,true) end
+      if not (UI.tab_gesture and UI.tab_gesture.dragging)
+          and UI.double_click_released('tab_'..board.id,hovered) then
+        request_modal({kind='rename_column',title='Rename tab',target=board,value=board.name})
+      end
+      local menu='tab_actions_'..board.id
+      if hovered and ImGui.IsMouseReleased(ctx,1) then ImGui.OpenPopup(ctx,menu) end
+      if begin_action_popup(menu) then
+        UI.tab_gesture=nil
+        UI.board_actions(board,index);ImGui.EndPopup(ctx)
       end
     end
-    ImGui.EndTabBar(ctx)
+    local press=UI.tab_gesture
+    if press and press.dragging then
+      local hovered=ImGui.IsWindowHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+      -- Scrollbar space is excluded from both delivery and the insertion line.
+      local scrollbar=ImGui.GetStyleVar(ctx,ImGui.StyleVar_ScrollbarSize)
+      local content_h=strip_h-(total>list_width and scrollbar or 0)
+      local target=UI.tab_reorder_target(rects,mx,my,sx+pad,sy,list_width,content_h,hovered)
+      if target then
+        local ix=math.max(sx+pad,math.min(sx+pad+list_width,target.x))
+        local color=ImGui.GetColor(ctx,ImGui.Col_CheckMark)
+        ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx),ix,sy+m.tabs_strip_pad_y,
+          ix,sy+content_h,color,m.tabs_drop_line_width)
+        if ImGui.IsMouseReleased(ctx,0) then UI.queue_tab_reorder(press.id,target.before) end
+      end
+      if target and ImGui.IsMouseDown(ctx,0) then
+        local now=reaper.time_precise()
+        local dt=math.min(0.05,math.max(0,now-(press.scroll_time or now)))
+        press.scroll_time=now
+        local edge=math.min(m.tabs_drag_scroll_edge,list_width*0.25)
+        local direction=mx<sx+pad+edge and -1 or mx>sx+pad+list_width-edge and 1 or 0
+        ImGui.SetScrollX(ctx,math.max(0,math.min(ImGui.GetScrollMaxX(ctx),
+          ImGui.GetScrollX(ctx)+direction*m.tabs_drag_scroll_speed*dt)))
+      else press.scroll_time=nil end
+    end
+    ImGui.EndChild(ctx)
+  elseif UI.tab_gesture then
+    -- A clipped strip cannot accept a release during a docking/resize frame.
+    if ImGui.IsMouseReleased(ctx,0) then UI.tab_gesture=nil end
   end
-  if session.pending then local fn=session.pending; session.pending=nil; fn() end
+  if ImGui.IsMouseReleased(ctx,0) or not ImGui.IsMouseDown(ctx,0) then UI.tab_gesture=nil end
+  -- Draw tab controls in the parent, never under the scrolling child ID.
+  local control_y=sy+(strip_h-side)*0.5
+  local menu_x=menu_right-side
+  local add_x=menu_x-gap-side
+  ImGui.SetCursorScreenPos(ctx,add_x,control_y)
+  ImGui.BeginDisabled(ctx,#session.doc.tabs>=8)
+  if UI.source_button('add_page','+',side,side) then add_column() end
+  ImGui.EndDisabled(ctx)
+  ImGui.SetItemTooltip(ctx,tr('New tab'))
+  ImGui.SetCursorScreenPos(ctx,menu_x,control_y)
+  if UI.source_button('page_actions','...',side,side) then ImGui.OpenPopup(ctx,'page_actions') end
+  if begin_action_popup('page_actions') then
+    UI.board_actions(active_tab(),session.active)
+    ImGui.EndPopup(ctx)
+  end
+  -- The strip is one layout row, although its controls are drawn explicitly.
+  ImGui.SetCursorScreenPos(ctx,sx,sy)
+  ImGui.Dummy(ctx,available,strip_h)
 end
+
+local function draw_document()
+  -- A hovered tab may have requested a page switch during the previous frame.
+  if force_tab then
+    for i,board in ipairs(session.doc.tabs) do
+      if board.id==force_tab then session.active=i;break end
+    end
+    force_tab=nil
+  end
+  local board=active_tab()
+  if not board then return end
+  -- Legacy minimized-column state is not meaningful for single-page tabs.
+  board.folded=false
+  UI.tabs_strip()
+  board=active_tab()
+  if not board then return end
+  board.folded=false
+  local container_flags=ImGui.WindowFlags_NoScrollbar|ImGui.WindowFlags_NoScrollWithMouse
+  if ImGui.BeginChild(ctx,'active_page_panel',0,0,0,container_flags) then
+    ImGui.PushID(ctx,board.id)
+    local content_x=ImGui.GetCursorScreenPos(ctx)
+    local content_w=ImGui.GetContentRegionAvail(ctx)
+    local body_right=content_x+content_w
+    local pad_x=ImGui.GetStyleVar(ctx,ImGui.StyleVar_WindowPadding)
+    local safe_right=UI.board_actions_edge(body_right,pad_x)
+    -- Prefer the same absolute action edge as the toolbar and page tabs,
+    -- but never move native group/note controls into the scrollbar region.
+    local actions_right=math.min(safe_right,UI.shared_actions_right or safe_right)
+    if ImGui.BeginChild(ctx,'page_body',0,0,0,ImGui.WindowFlags_NoScrollbar) then
+      -- A regular BeginChild has no top window padding. Without this inset
+      -- the first group header touches the tab strip above it.
+      if UI_METRICS.group_panel_top_padding>0 then
+        local px,py=ImGui.GetCursorScreenPos(ctx)
+        ImGui.SetCursorScreenPos(ctx,px,py+UI_METRICS.group_panel_top_padding)
+      end
+      ImGui.Indent(ctx,UI_METRICS.inner_gap)
+      local placing=UI.place_valid(UI.place)
+      for si,section in ipairs(board.columns) do
+        ImGui.PushID(ctx,section.id)
+        local sx,sy=ImGui.GetCursorScreenPos(ctx)
+        local section_width=math.max(1,ImGui.GetContentRegionAvail(ctx))
+        local placement_layer
+        if placing then
+          -- A dedicated outer splitter allows note marker layers to nest.
+          -- The outline is behind contents/separators, so their edges stay
+          -- intact even when a separator runs through a placement area.
+          placement_layer=UI.marker_layer(section,UI.placement_layers)
+          ImGui.DrawListSplitter_Split(placement_layer.splitter,2)
+          ImGui.DrawListSplitter_SetCurrentChannel(placement_layer.splitter,1)
+          ImGui.PushStyleVar(ctx,ImGui.StyleVar_DisabledAlpha,1)
+          ImGui.BeginDisabled(ctx,true)
+        end
+        ImGui.BeginGroup(ctx)
+        ImGui.BeginGroup(ctx)
+        column_header(board,section,si,actions_right)
+        ImGui.EndGroup(ctx)
+        local _,header_bottom=ImGui.GetItemRectMax(ctx)
+        local header_hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+        UI.section_hover(section,header_hovered)
+        local note_rects={}
+        -- Folded groups use their heading; expanded groups replace this with
+        -- actual note-body geometry, measured BEFORE the trailing separator.
+        local placement_visual={x=sx,y=sy,width=math.max(1,math.min(section_width,actions_right-sx)),bottom=header_bottom}
+        if not section.folded then
+          ImGui.Indent(ctx,UI_METRICS.inner_gap+UI_METRICS.note_row_inset_x)
+          local body_x,body_y=ImGui.GetCursorScreenPos(ctx)
+          local body_width=math.max(1,math.min(ImGui.GetContentRegionAvail(ctx),actions_right-body_x))
+          ImGui.PushFont(ctx,font,size)
+          local order=M.display_order(section,hide_completed,completed_last)
+          for _,index in ipairs(order) do
+            note_rects[#note_rects+1]=UI.note_row(board,section,
+              section.blocks[index],index,actions_right)
+            if section.reveal_note_id==section.blocks[index].id then
+              ImGui.SetScrollHereY(ctx,0.5);section.reveal_note_id=nil
+            end
+          end
+          if #order==0 then
+            ImGui.TextDisabled(ctx,tr(#section.blocks==0 and 'No notes yet' or 'Completed items hidden'))
+            ImGui.Dummy(ctx,0,placing and UI_METRICS.empty_tab_placement_height or UI_METRICS.inner_gap)
+            local _,empty_bottom=ImGui.GetItemRectMax(ctx)
+            placement_visual={x=body_x,y=body_y,width=body_width,bottom=empty_bottom}
+          else
+            local first,last=note_rects[1],note_rects[#note_rects]
+            placement_visual={x=first.x,y=first.y,width=first.width,bottom=last.bottom}
+          end
+          ImGui.PopFont(ctx)
+          ImGui.Unindent(ctx,UI_METRICS.inner_gap+UI_METRICS.note_row_inset_x)
+        end
+        ImGui.EndGroup(ctx)
+        local _,bottom=ImGui.GetItemRectMax(ctx)
+        if placing then ImGui.EndDisabled(ctx);ImGui.PopStyleVar(ctx) end
+        if not placing then UI.note_drop_section(section,note_rects) end
+        if placing then
+          ImGui.DrawListSplitter_SetCurrentChannel(placement_layer.splitter,0)
+          UI.placement_target(section,sx,sy,section_width,bottom,'section',nil,placement_visual)
+          ImGui.DrawListSplitter_Merge(placement_layer.splitter)
+        end
+        ImGui.PopID(ctx)
+      end
+      UI.note_drag_scroll()
+      ImGui.Unindent(ctx,UI_METRICS.inner_gap)
+      UI.overlay_scroll_thumb(board)
+      ImGui.EndChild(ctx) -- page_body
+    end
+    ImGui.PopID(ctx)
+    ImGui.EndChild(ctx) -- active_page_panel
+  end
+  if session.pending then local fn=session.pending;session.pending=nil;fn() end
+end
+
 local function draw_modal()
   -- A native modal must be explicitly closed when its owner/draft changes.
   -- This runs in a stable root ID scope even when the document epoch changes.
   if UI.editor_popup and UI.editor_popup.draft~=modal then
-    if ImGui.BeginPopupModal(ctx,UI.editor_popup.title,nil,ImGui.WindowFlags_NoTitleBar|ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings) then
-      ImGui.CloseCurrentPopup(ctx);ImGui.EndPopup(ctx)
-    end
+    if not UI.close_modal_if_open(UI.editor_popup.title) then return end
     UI.editor_popup=nil
   end
   if open_modal then ImGui.OpenPopup(ctx,open_modal);open_modal=nil end
   if not modal then return end
   local m=modal
   UI.editor_popup={draft=m,title=m.title}
-  local dimensions=UI_METRICS.popup_sizes[m.kind] or UI_METRICS.popup_sizes.name
-  local width,height=table.unpack(dimensions)
+  local width,height=UI.popup_dimensions(m.kind)
   if m.kind=='new_tab' or m.kind=='rename_column' then
     width,height=UI.name_geometry(m.title)
   elseif m.kind=='delete' then
@@ -2797,7 +5052,7 @@ local function draw_modal()
   UI.place_popup(width,height)
   local border=themes[theme].dim
   ImGui.PushStyleColor(ctx,ImGui.Col_Border,border)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_PopupBorderSize,1.5)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_PopupBorderSize,UI_METRICS.popup_border_size)
   local visible=ImGui.BeginPopupModal(ctx,m.title,nil,ImGui.WindowFlags_NoTitleBar|ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings)
   ImGui.PopStyleVar(ctx);ImGui.PopStyleColor(ctx)
   if visible then
@@ -2827,7 +5082,7 @@ local function draw_modal()
           -- grow without moving either editor independently.
           ImGui.TableNextRow(ctx)
           ImGui.TableNextColumn(ctx)
-          ImGui.Text(ctx,tr('Destination column'))
+          ImGui.Text(ctx,tr('Destination tab'))
           ImGui.SetNextItemWidth(ctx,-1)
           if ImGui.BeginCombo(ctx,'##import_column',m.column.name) then
             for _,column in ipairs(active_tab().columns) do
@@ -2836,12 +5091,17 @@ local function draw_modal()
             ImGui.EndCombo(ctx)
           end
           local rv,value=UI.checkbox(ui_label('Remove numbering'),m.strip)
-          if rv then m.strip=value;m.preview=M.import_text(m.value,m.strip) end
+          if rv then m.strip=value;refresh_import_preview(m) end
+          rv,value=UI.checkbox(ui_label('Recognize timecodes'),m.timecodes)
+          if rv then m.timecodes=value;refresh_import_preview(m) end
           -- One extra item gap separates the header from the panel labels.
           ImGui.Dummy(ctx,0,0)
           ImGui.TableNextColumn(ctx)
           ImGui.TextWrapped(ctx,tr('Paste text or a numbered list on the left. The notes to be added appear on the right.'))
           ImGui.TextWrapped(ctx,tr('Separate paragraphs with a blank line. In a numbered list, start each new item on a new line.'))
+          if m.timecodes then
+            ImGui.TextWrapped(ctx,tr('Timecodes: MM:SS, HH:MM:SS or HH:MM:SS:FF (project FPS); optional milliseconds without frames. Double-click the clock/time indicator to jump.'))
+          end
           ImGui.Dummy(ctx,0,0)
           ImGui.TableNextRow(ctx)
           ImGui.TableNextColumn(ctx)
@@ -2852,10 +5112,9 @@ local function draw_modal()
           ImGui.TableNextColumn(ctx)
           local _,remaining_h=ImGui.GetContentRegionAvail(ctx)
           -- Let the table fit its rows; leave only the normal trailing item gap.
-          local pane_h=math.max(56,math.floor(remaining_h-UI_METRICS.item_gap_y))
-          if m.focus then ImGui.SetKeyboardFocusHere(ctx);m.focus=nil end
-          rv,value=ImGui.InputTextMultiline(ctx,'##import_text',m.value,-1,pane_h,ImGui.InputTextFlags_AllowTabInput)
-          if rv then m.value=value;m.preview=M.import_text(value,m.strip) end
+          local pane_h=math.max(UI_METRICS.import_pane_min_height,math.floor(remaining_h-UI_METRICS.item_gap_y))
+          rv,value=UI.import_source(m,pane_h)
+          if rv then m.value=value;refresh_import_preview(m) end
           ImGui.TableNextColumn(ctx)
           if ImGui.BeginChild(ctx,'import_preview',0,pane_h,ImGui.ChildFlags_Borders) then
             if #m.preview==0 then
@@ -2882,12 +5141,18 @@ local function draw_modal()
         ImGui.TextWrapped(ctx,tr('Options (select a circle to set the current value)'))
         local _,add_h=UI.button_size(tr('+ Option'))
         local _,available_h=ImGui.GetContentRegionAvail(ctx)
-        if ImGui.BeginChild(ctx,'options',0,math.max(60,available_h-add_h-UI_METRICS.item_gap_y),ImGui.ChildFlags_Borders) then
+        if ImGui.BeginChild(ctx,'options',0,math.max(UI_METRICS.options_panel_min_height,available_h-add_h-UI_METRICS.item_gap_y),ImGui.ChildFlags_Borders) then
           local action
           for i,option in ipairs(m.options) do
             ImGui.PushID(ctx,i)
             if ImGui.RadioButton(ctx,'##selected',m.selected==i) then m.selected=i end
-            ImGui.SameLine(ctx);ImGui.SetNextItemWidth(ctx,math.max(60,ImGui.GetContentRegionAvail(ctx)-110))
+            ImGui.SameLine(ctx)
+            local available=ImGui.GetContentRegionAvail(ctx)
+            local delete_w=UI.button_size(tr('X'))
+            local actions_w=math.max(UI_METRICS.option_actions_reserved_width,
+              2*ImGui.GetFrameHeight(ctx)+delete_w+3*UI_METRICS.item_gap_x)
+            ImGui.SetNextItemWidth(ctx,math.max(1,math.min(available,
+              math.max(UI_METRICS.option_input_min_width,available-actions_w))))
             rv,value=ImGui.InputText(ctx,'##option',option)
             if rv then m.options[i]=value end
             ImGui.SameLine(ctx)
@@ -2925,12 +5190,24 @@ local function draw_modal()
         session.error=nil;session.history_readonly=nil;session.restore_pending=true
       elseif m.kind=='rename_column' then m.target.name=m.value
       elseif m.kind=='import' then
-        for _,text in ipairs(m.preview) do m.column.blocks[#m.column.blocks+1]=M.note(text) end
+        m.column.folded=false
+        local fps,drop_frame=project_timecode_settings()
+        for _,text in ipairs(m.preview) do
+          local block=M.note(text)
+          if M.timecode_prefix(text,fps,drop_frame)~=nil then block.timecode=m.timecodes end
+          m.column.blocks[#m.column.blocks+1]=block
+        end
       elseif m.kind=='delete' then m.action();edit_action=m.history_action
       elseif m.kind=='select' then
         m.target.label=m.label;m.target.options=m.options;m.target.selected=m.selected
       end
-      if m.kind~='delete' then touch(nil,({new_tab='add_tab',rename_column='rename_column',import='import',select='edit_dropdown',restore='restore'})[m.kind]) end
+      if m.kind~='delete' then
+        local action=({new_tab='add_tab',rename_column='rename_column',import='import',select='edit_dropdown',restore='restore'})[m.kind]
+        if m.kind=='rename_column' then
+          action=m.title=='Rename group' and 'rename_group' or m.title=='Rename tab' and 'rename_tab' or action
+        end
+        touch(nil,action)
+      end
       undo_boundary=true;done=true
     end
     ImGui.EndDisabled(ctx)
@@ -2940,6 +5217,55 @@ local function draw_modal()
     ImGui.EndPopup(ctx)
   end
   if not visible and not ImGui.IsPopupOpen(ctx,m.title) then modal=nil end
+end
+-- Independent confirmation avoids discarding the note draft when the
+-- ordinary document modal temporarily invalidates the active text widget.
+local function draw_note_cancel_popup()
+  local title='Discard note changes?###note_cancel'
+  local prompt=UI.note_cancel_prompt
+  if prompt and (prompt.edit~=UI.note_edit or prompt.edit.owner~=session) then
+    UI.note_cancel_prompt=nil;prompt=nil
+  end
+  -- Lua state can disappear on owner change, external reload or another
+  -- modal. Close the corresponding native popup in its stable root scope.
+  if UI.note_cancel_window and UI.note_cancel_window~=prompt then
+    if not UI.close_modal_if_open(title) then return end
+    UI.note_cancel_window=nil
+  end
+  if not prompt then return end
+  local opening=prompt.open
+  if opening then
+    ImGui.OpenPopup(ctx,title);prompt.open=false;UI.note_cancel_window=prompt
+  end
+  local width,height=UI.popup_dimensions('note_cancel')
+  UI.place_popup(width,height)
+  if ImGui.BeginPopupModal(ctx,title,nil,
+      ImGui.WindowFlags_NoTitleBar|ImGui.WindowFlags_NoResize|ImGui.WindowFlags_NoSavedSettings) then
+    ImGui.Text(ctx,tr('Discard note changes?'))
+    ImGui.Separator(ctx)
+    ImGui.TextWrapped(ctx,tr('The note has unsaved changes. Discard them?'))
+    ImGui.Spacing(ctx)
+    local discard=UI.button(ctx,ui_label('Discard changes'))
+    ImGui.SameLine(ctx)
+    local keep=UI.button(ctx,ui_label('Continue editing')) or (escape_pressed and not opening)
+    if discard then
+      ImGui.CloseCurrentPopup(ctx);UI.note_cancel_window=nil
+      UI.end_note_edit(true)
+    elseif keep then
+      ImGui.CloseCurrentPopup(ctx);UI.note_cancel_window=nil
+      UI.note_cancel_prompt=nil
+      local edit=UI.note_edit
+      if edit then
+        edit.focus=true
+        if edit.source_editor then
+          edit.source_editor.focused=true;edit.source_editor.focus_pending=true
+        end
+      end
+    end
+    ImGui.EndPopup(ctx)
+  elseif not ImGui.IsPopupOpen(ctx,title) then
+    UI.note_cancel_prompt=nil;UI.note_cancel_window=nil
+  end
 end
 local function problem_view()
   ImGui.TextWrapped(ctx,UI.message(session.error or 'Native notes changed while this draft was being edited. Automatic writing is paused.'))
@@ -2960,7 +5286,10 @@ local function problem_view()
   end
   if not session.doc and UI.button(ctx,ui_label('Open original as plain text...')) then
     if reaper.MB(language=='ru' and 'Поместить весь исходный текст в новый блок?\nДанные не будут удалены. Сохранённые заметки изменятся только после следующей правки.' or 'Keep the complete original text in a new text block?\nNo data will be removed. The native notes will change only after your next edit.',TITLE,4)==6 then
-      session.doc=M.plain(session.raw); session.error=nil; epoch=epoch+1
+      session.doc=M.plain(session.raw); session.error=nil
+      -- The first subsequent edit must be undoable to the exact unsupported
+      -- or damaged original, using the same guarded path as recovery Undo.
+      session.history_readonly=true; epoch=epoch+1
     end
   end
   ImGui.InputTextMultiline(ctx,'##recovery',raw,-1,-1,ImGui.InputTextFlags_ReadOnly)
@@ -2983,25 +5312,19 @@ local function scope_selector()
     end
     ImGui.EndCombo(ctx)
   end
-  if session and not switched then
-    local width,height,icon_side=UI.edit_mode_size()
-    UI.toolbar_next(row,width)
-    if UI.edit_mode_button(width,height,icon_side) then
-      editing=not editing;pref('editing',editing and '1' or '0')
-    end
-  end
   -- Move the complete font control to a new row when its measured width will
   -- not fit. Reserve the widest readout so dragging does not reflow the toolbar.
   local label_w=ImGui.CalcTextSize(ctx,tr('Font'))
   local value_w=0
-  for n=12,32 do value_w=math.max(value_w,(ImGui.CalcTextSize(ctx,tostring(n)..tr(' px')))) end
+  for n=UI_METRICS.note_text_min_size,UI_METRICS.note_text_max_size do value_w=math.max(value_w,(ImGui.CalcTextSize(ctx,tostring(n)..tr(' px')))) end
   local fixed_w=label_w+value_w+2*UI_METRICS.inner_gap
   local slider_w=math.max(UI_METRICS.slider_min_width,
     math.min(UI_METRICS.slider_width,row.width-fixed_w))
   UI.toolbar_right(row,fixed_w+slider_w)
   ImGui.AlignTextToFramePadding(ctx)
   ImGui.Text(ctx,tr('Font'));ImGui.SameLine(ctx,0,UI_METRICS.inner_gap)
-  local rv,value=UI.slider('font',size,12,32,slider_w,16)
+  local rv,value=UI.slider('font',size,UI_METRICS.note_text_min_size,
+    UI_METRICS.note_text_max_size,slider_w,UI_METRICS.note_text_default_size)
   local value_caption=tostring(value)..tr(' px')
   local caption_w=ImGui.CalcTextSize(ctx,value_caption)
   ImGui.SameLine(ctx,0,UI_METRICS.inner_gap+value_w-caption_w)
@@ -3028,7 +5351,12 @@ local function frame()
   frame_checkpoint=nil
   changed=false; undo_boundary=false; edit_key=nil; edit_action=nil; history_request=nil
   if not sync_project() then return false end
-  if bulk_selection and (bulk_selection.owner~=session or not editing or not session or not session.doc or session.error or session.conflict) then bulk_selection=nil end
+  if bulk_selection and (bulk_selection.owner~=session or not session or not session.doc or session.error or session.conflict) then bulk_selection=nil end
+  if bulk_selection then
+    local board=M.note_column(session.doc,bulk_selection.column)
+    if not board or board.folded or bulk_selection.column.folded then bulk_selection=nil end
+  end
+  if UI.place and not UI.place_valid(UI.place) then UI.place=nil;UI.place_cancelled=true end
   if pending_language then
     language=pending_language;pending_language=nil;pref('language',language)
     modal=nil;open_modal=nil;tab_rename=nil;UI.info=nil;UI.menu_open=nil
@@ -3036,6 +5364,8 @@ local function frame()
   if pending_theme then
     theme=pending_theme;pending_theme=nil;pref('theme',theme)
   end
+  if UI.note_edit and not UI.note_edit_valid(UI.note_edit) then UI.end_note_edit() end
+  if not UI.input_focus_valid(UI.new_input) then UI.new_input=nil end
   local before=session and {raw=session.raw,active=session.active,allow_invalid=session.history_readonly} or nil
   frame_checkpoint=session and {session=session,raw=session.raw} or nil
   if session and not session.error and not session.conflict then
@@ -3044,8 +5374,11 @@ local function frame()
   if not ctx then
     ctx=ImGui.CreateContext(CONTEXT_NAME,ImGui.ConfigFlags_DockingEnable|ImGui.ConfigFlags_NavEnableKeyboard)
     ImGui.SetConfigVar(ctx,ImGui.ConfigVar_InputTextCursorBlink,1)
-    font=ImGui.CreateFont('sans-serif')
+    font=ImGui.CreateFont(UI_METRICS.font_family)
     ImGui.Attach(ctx,font)
+    -- A real bold face (not a duplicated text shadow) for column names.
+    heading_bold_font=ImGui.CreateFont(UI_METRICS.font_family,ImGui.FontFlags_Bold)
+    ImGui.Attach(ctx,heading_bold_font)
     input_callback=ImGui.CreateFunctionFromEEL('seen=1; cursor=CursorPos; first=SelectionStart; last=SelectionEnd;')
     ImGui.Attach(ctx,input_callback)
   end
@@ -3055,27 +5388,31 @@ local function frame()
   -- A tiny nonzero alpha quantizes to transparent, but still allows ImGui to
   -- measure children (Alpha==0 may skip their layout). Viewer startup pattern.
   if warming then ImGui.PushStyleVar(ctx,ImGui.StyleVar_Alpha,0.001) end
-  local nc=styles()
+  local nc,nv=styles()
   ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
-  ImGui.SetNextWindowSize(ctx,840,560,ImGui.Cond_FirstUseEver)
-  ImGui.SetNextWindowSizeConstraints(ctx,540,360,10000,10000)
+  ImGui.SetNextWindowSize(ctx,UI_METRICS.window_initial_width,UI_METRICS.window_initial_height,ImGui.Cond_Once)
+  ImGui.SetNextWindowSizeConstraints(ctx,UI_METRICS.window_min_width,UI_METRICS.window_min_height,10000,10000)
   if dock_request~=nil then ImGui.SetNextWindowDockID(ctx,dock_request,ImGui.Cond_Always); dock_request=nil end
   local project=reaper.EnumProjects(-1,'')
   local project_name=project and reaper.GetProjectName(project,'') or ''
   local window_title=TITLE..' — '..(project_name~='' and label(project_name) or tr('Untitled project'))
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,4,math.max(0,(38-ImGui.GetTextLineHeight(ctx))*0.5))
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_FramePadding,UI_METRICS.menu_bar_pad_x,math.max(0,(UI_METRICS.menu_bar_height-ImGui.GetTextLineHeight(ctx))*0.5))
   local visible,opened=ImGui.Begin(ctx,window_title..'###Patch34ProjectNotes',true,ImGui.WindowFlags_MenuBar)
   ImGui.PopStyleVar(ctx)
   if visible then
     -- Invalidate active text widgets after external reload/project switch.
     ImGui.PushID(ctx,epoch)
     escape_pressed=ImGui.IsKeyPressed(ctx,ImGui.Key_Escape,false)
-    if not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0) then UI.double_press=nil;UI.tab_press=nil end
+    UI.note_drag_update()
+    UI.place_update()
+    UI.note_edit_update()
+    if not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0) then UI.double_press=nil;UI.tab_press=nil;UI.column_press=nil end
     if warming then ImGui.BeginDisabled(ctx,true) else history_shortcuts() end
     menu_bar()
     local switching=scope_selector()
-    if bulk_selection and not editing then bulk_selection=nil end
+    if switching or history_request or modal or tab_rename or UI.info then UI.end_note_edit() end
     header_context()
+    if switching then UI.place=nil else UI.creation_toolbar() end
     if switching then ImGui.TextDisabled(ctx,tr('Switching note owner...'))
     elseif not session then ImGui.TextWrapped(ctx,UI.message(selection_message or 'Select an object in REAPER.'))
     elseif session.error or session.conflict then problem_view()
@@ -3083,13 +5420,17 @@ local function frame()
       if session.target.kind~='project' then ImGui.TextWrapped(ctx,UI.owner_title(session.target)) end
       draw_document()
     end
+    if UI.end_edit_after_frame==UI.note_edit and UI.note_edit then UI.end_note_edit() end
+    if UI.note_edit and not UI.note_edit_valid(UI.note_edit) then UI.end_note_edit() end
     UI.info_window()
     if warming then ImGui.EndDisabled(ctx) end
     ImGui.PopID(ctx)
     draw_modal()
+    draw_note_cancel_popup()
     ImGui.End(ctx)
   end
-  ImGui.PopFont(ctx); ImGui.PopStyleVar(ctx,7); ImGui.PopStyleColor(ctx,nc)
+  if not opened and UI.note_edit then UI.end_note_edit() end
+  ImGui.PopFont(ctx); ImGui.PopStyleVar(ctx,nv); ImGui.PopStyleColor(ctx,nc)
   if warming then
     -- Count collapsed attempts too, so a restored collapsed window cannot
     -- remain transparent indefinitely.
@@ -3108,7 +5449,7 @@ local function frame()
       session.undo_due=reaper.time_precise()+0.8
     end
   end
-  if session and (undo_boundary or not editing) then session.history.key=nil end
+  if session and (undo_boundary or not UI.note_edit) then session.history.key=nil end
   if session and (undo_boundary or (session.undo_due and reaper.time_precise()>=session.undo_due)) then flush_undo(session) end
   if history_request and can_history(history_request) then
     flush_undo(session)
@@ -3125,10 +5466,19 @@ local function frame()
 end
 local function exit()
   if crashed then return end
-  for _,s in pairs(sessions) do
+  -- REAPER can terminate a deferred script without another drawing frame.
+  -- Export changed note/dialog drafts; never write native notes on shutdown.
+  local handled={}
+  local function finish(s)
+    if not s or handled[s] then return end
+    handled[s]=true
+    pcall(save_pending_recovery,s,'Script exited during an active draft / Закрытие во время редактирования черновика')
     if s.dirty and not s.recovery then pcall(save_recovery,s,'Closed with an unsaved draft / Закрыто с несохранённым черновиком') end
     pcall(flush_undo,s)
   end
+  finish(session)
+  finish(UI and UI.note_edit and UI.note_edit.owner)
+  for _,s in pairs(sessions) do finish(s) end
 end
 reaper.atexit(exit)
 local function loop()
@@ -3142,15 +5492,16 @@ local function loop()
       if not s or handled[s] then return end
       handled[s]=true
       local baseline=frame_checkpoint and frame_checkpoint.session==s and frame_checkpoint.raw or s.raw
-      local pending=s==session and (tab_rename or modal) or nil
-      pcall(save_recovery,s,keep,baseline,pending)
+      pcall(save_recovery,s,keep,baseline,UI.recovery_pending(s))
     end
     recover(session)
+    recover(UI.note_edit and UI.note_edit.owner)
     for _,s in pairs(sessions) do if s.dirty then recover(s) end end
-    pcall(reaper.ShowConsoleMsg,TITLE..'\n'..tostring(keep)..'\n')
+    pcall(reaper.ShowConsoleMsg,TITLE..' v'..VERSION..'\n'..tostring(keep)..'\n')
+    local first_line=tostring(keep):match('^([^\n]*)') or tostring(keep)
     local message=language=='ru' and
-      'Скрипт остановлен. Аварийной записи в заметки не было.\nЕсли сбой произошёл внутри записи REAPER, проверь заметки.\nПути к аварийным копиям или ошибки их сохранения — в консоли.\nПосле перезапуска: Правка → Открыть аварийную копию.' or
-      'The script stopped. The error handler did not write to native notes.\nIf REAPER failed during a write, inspect the native notes.\nRecovery paths or export errors are in the console.\nAfter restarting: Edit > Open recovery copy.'
+      'Скрипт остановлен. Аварийной записи в заметки не было.\n\nОшибка: '..first_line:sub(1,600)..'\n\nПолный стек — в консоли и report.txt аварийной копии.' or
+      'The script stopped. Recovery did not write native notes.\n\nError: '..first_line:sub(1,600)..'\n\nFull stack: console and recovery report.txt.'
     pcall(reaper.MB,message,TITLE,0)
     return
   end

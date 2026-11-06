@@ -2,8 +2,7 @@
 
 **English** · [Русский](README_RU.md)
 
-
-ReaNotepad is a structured notes editor for REAPER projects, tracks and items. Documents contain tabs, resizable columns, text blocks, checkbox notes and dropdown fields. Notes are stored in the REAPER project.
+ReaNotepad is a structured notes editor for REAPER projects, tracks and media items. Keep edit lists, tasks, production notes and status fields in one window. Each document has horizontal tabs containing collapsible groups of notes. Notes are stored in the REAPER project rather than separate working files.
 
 ![ReaNotepad in REAPER](assets/screenshot.png)
 
@@ -14,175 +13,135 @@ ReaNotepad is a structured notes editor for REAPER projects, tracks and items. D
 | REAPER | 7 or later |
 | ReaImGui | 0.10 or later |
 
-ReaImGui is available through [ReaPack](https://reapack.com/).
+Install ReaImGui through [ReaPack](https://reapack.com/). SWS is not required.
 
 ## Installation
 
 1. Install ReaImGui through ReaPack.
-2. Download the release archive and extract `ReaNotepad.lua` to the REAPER `Scripts` directory. The resource directory is available under **Options → Show REAPER resource path in explorer/finder**.
+2. Download `ReaNotepad.lua` from the release and place it in your REAPER `Scripts` folder. Find the resource folder via **Options → Show REAPER resource path in explorer/finder**.
 3. Open **Actions → Show action list** and select the **Main** section.
-4. Select **New action → Load ReaScript**, then open `ReaNotepad.lua`.
-5. Select the registered action and click **Run**.
+4. Choose **New action → Load ReaScript**, select `ReaNotepad.lua`, then run the registered action.
+
+ReaNotepad is also maintained in the [Patch34 Scripts ReaPack repository](https://raw.githubusercontent.com/patch-34/patch34-reapack/main/index.xml). Its index is updated separately from this GitHub repository, so the version shown in ReaPack may differ temporarily.
 
 ## Updating
 
-Replace `ReaNotepad.lua` at the same location used during installation. Re-registering the action is not required; its keyboard shortcuts and toolbar assignments are retained. The filename remains the same across releases; the version is recorded in About, script metadata and the release archive name.
+Replace the existing `ReaNotepad.lua` in the same location. Keep that filename unchanged to retain REAPER action IDs, shortcuts and toolbar assignments. You do not need to register the action again. Save a backup of important REAPER projects before opening them with a new major document format.
 
 ## Documents and storage
 
-The selector in the top toolbar sets the note scope.
+Use the owner selector at the top to switch between three scopes:
 
-| Scope | Note owner | Storage |
+| Scope | Owner | Storage |
 | --- | --- | --- |
-| Project | Current project | Native project notes |
-| Track | One selected track, including the master track | Track extension data in the `.rpp` file |
-| Item | One selected item | Native item notes |
+| Project | Current REAPER project | Native project notes |
+| Track | One selected track, including the master track | Track extension data in the `.rpp` project |
+| Item | One selected media item | Native item notes |
 
-Track and Item modes follow the REAPER selection. Each owner has an independent document and Undo/Redo history.
+In Track and Item modes, the editor follows the selection in REAPER and requires exactly one owner. Every owner has its own tabs, groups and session Undo/Redo history. Changes are written into the open project; **save the REAPER project** to make them persistent on disk.
 
-Edits are written to the open project. Save the REAPER project to persist them to disk.
+Existing plain-text notes are imported into the document without changing their native contents until the first edit.
 
-Existing plain-text notes are displayed as a text block. Opening notes does not change their contents. The first edit converts plain text to the structured notes format.
+## Tabs, groups and notes
 
-## Tabs, columns and blocks
+A document has up to eight **horizontal tabs**. Each tab contains **vertical groups** with their own heading, disclosure arrow and notes. Only the active tab is shown.
 
-A document contains tabs. Each tab supports up to eight columns.
-
-| Operation | Control |
+| Action | How to do it |
 | --- | --- |
-| Create, rename, reorder or delete tabs | **Tab** menu |
-| Rename a tab inline | Double-click the tab |
-| Delete a specific tab | Right-click the tab → **Delete tab…** |
-| Add a column | **Add → Column** |
-| Resize columns | Drag the divider between columns |
-| Rename a column | Double-click its name, or **… → Rename column…** |
-| Move or delete a column | Column **…** menu |
+| Create a tab | **Tabs → New tab** or the **+** beside the tab strip |
+| Switch tabs | Click a tab or choose it in the **Tabs** menu |
+| Reorder tabs | Drag tabs left or right, or use their context menu |
+| Rename a tab | Double-click its title, or use its context menu |
+| Delete a tab | Right-click the tab → **Delete tab…** (the last tab cannot be deleted) |
+| Create a group | **Add → New group**, the top toolbar's group icon, or **New group below** in a group menu |
+| Collapse/expand a group | Click its disclosure arrow |
+| Rename, reorder or delete a group | Open its **…** menu; double-click its title to rename |
+| Color a group heading | Group **… → Group header color** |
 
-For inline tab renaming, Enter or a click outside the field applies the name; Esc cancels. The last tab cannot be deleted. Column width proportions are retained for the current session.
+A group can contain multiline text notes, notes with completion checkboxes, and named dropdown fields with editable choices. Hover over the icons in the top toolbar for tooltips. To create an element, **drag its icon onto a group**, or **click the icon and then choose a group**; Esc cancels placement. The **Add** menu also creates notes in the active group. Import opens a separate dialog.
 
-The icons in each column heading create or import blocks in that column. Hovering over an icon displays its action name.
+Drag a note by the grip at its left edge to reorder it or move it into another group or tab. During a drag, the top toolbar displays a trash target for deletion. Individual note menus also offer **Move up**, **Move down**, **Move to group**, **Color marker** and **Delete…**.
 
-| Action | Result |
-| --- | --- |
-| Text | Multiline text block |
-| Note with checkbox | Multiline note with a completion checkbox |
-| Dropdown | Named field with editable options |
-| Import text | Text import dialog |
+### Editing text and dropdowns
 
-The top-level **Add** menu provides the same block types. Block properties contain movement, color and deletion commands. Open properties with **…** in Edit mode or by right-clicking the block in Read mode.
+Click a text note to edit it in place. **Enter** applies the edit, **Shift+Enter** inserts a line break, and clicking outside applies the edit. **Esc** asks for confirmation before discarding changed text. Read-mode text wraps visually without changing the saved line breaks.
 
-### Editing
-
-Select **Edit** (pencil) in the top toolbar to edit text and display column controls. The button is highlighted while editing and displays **Done** (check mark). Select **Done** to return to Read mode, where text uses word wrapping. Both button states have the same width. Changes are written as they are edited; Done exits Edit mode. Completion checkboxes and dropdown values remain interactive in both modes. Text-editing fields use horizontal scrolling. Completed checkbox notes are displayed with reduced opacity; their contents and controls remain accessible.
-
-For dropdown configuration, select **Edit…** beside the field name or **… → Edit field…**. The dialog supports renaming the field, editing and reordering options, and setting the selected value.
-
-**Apply** commits a dialog. Esc or a click outside cancels it. Changing the note owner cancels unapplied dialogs and inline tab renaming.
+Click a checkbox to mark a note complete. Select a dropdown value directly from its menu. Use **Edit…** next to a dropdown's name or **… → Edit field…** to change its name, options, order and current value. An individual note edit is one Undo step.
 
 ## Multiple selection
 
-1. Select **Edit**.
-2. Open the column's **… → Select elements…** menu command.
-3. Click blocks to select or deselect them. Selected blocks display an outline and a corner check mark.
-4. Use the selection toolbar to apply an operation.
+Open a group's **… → Select elements…** command, then click notes to select or deselect them. The selection toolbar provides **All / Clear selection**, **Color…**, **Delete…** and **Done**. Deletion asks for confirmation; bulk color changes and deletions each form one Undo step.
 
-| Control | Function |
-| --- | --- |
-| All / Clear selection | Select or deselect all visible blocks in the column |
-| Color… | Assign or remove a color marker |
-| Delete… | Delete selected blocks after confirmation |
-| Done | Exit selection mode |
-
-Block contents are read-only during selection. Each bulk deletion or color assignment is a single Undo/Redo operation. In narrow columns, toolbar controls wrap or use icons with tooltips.
-
-Enabling **View → Hide completed** removes newly hidden blocks from the selection. Selection is cleared by changing the owner or tab, loading external note changes, using Undo/Redo, or leaving Edit mode. Esc exits selection mode; when a deletion confirmation is open, it cancels that dialog first.
+Only visible notes can be selected. Leaving selection mode, switching tabs or note owners, and Undo/Redo clear the selection. Esc exits selection mode, unless a confirmation dialog is open.
 
 ## Color markers
 
-For an individual block, select **Color marker** in its properties menu: **…** in Edit mode or a right-click on the block in Read mode. For multiple blocks, use **Color…** in the selection toolbar.
+Use a note's **Color marker** menu or the selection toolbar's **Color…** action. Available colors are red, orange, yellow, green, blue and purple; **No marker** removes the color. In **View → Color marker style**, choose a left strip or a subtle whole-note background tint. Group heading colors are set independently in the group's menu.
 
-Available markers: red, orange, yellow, green, blue and purple. **No marker** removes the marker. Colors are not assigned fixed priority values.
+Marker changes are stored with the document and support Undo/Redo. Changing the global display style does not change document contents.
 
-By default, a marker appears as a narrow strip at the left edge of the block. **View → Color marker style** provides **Left strip** and **Whole note**. Whole note applies a soft background tint to the block and its editing fields while retaining the normal text color. Completed notes remain dimmed with either style.
+## Text import and timecodes
 
-The style applies to all marked blocks and is retained between runs. Changing the style does not modify document content or create an Undo entry. Marker colors are stored with the document and support Undo/Redo.
+Open **Edit → Import text…**, use **Add → Import text…**, or choose the import icon in the toolbar and select the destination group.
 
-## Text import
+1. Select a destination group in the dialog.
+2. Paste the source text in the left pane and inspect the right-hand preview.
+3. Set **Remove numbering** and **Recognize timecodes** as needed.
+4. Click **Import**. All imported entries are added as unchecked checkbox notes in a single Undo step.
 
-Open **Edit → Import text…** or select the import icon in a column heading.
+Blank lines separate paragraphs; numbered entries can include continuation lines. Without blank lines or numbering, each nonempty line is a separate note. Numbering such as `1.`, `2)`, `(3)`, `[4]`, `5:`, `6 —` and `1.2.` is recognized; isolated years and ambiguous numbers are handled conservatively.
 
-1. Select the destination column.
-2. Paste source text into the left field.
-3. Set **Remove numbering** and review the result in the right pane.
-4. Select **Import**.
+When **Recognize timecodes** is enabled, a timecode at the **start** of a note can appear above it with a clock icon:
 
-Imported entries are appended as unchecked notes. The complete import is one Undo/Redo operation.
+| Example | Meaning |
+| --- | --- |
+| `01:45` | 1 minute, 45 seconds (`MM:SS`) |
+| `00:00:12` | 12 seconds (`HH:MM:SS`) |
+| `00:01:35:04` | 1 minute, 35 seconds, 4 frames (`HH:MM:SS:FF`) |
+| `00:01:35.250` | 1 minute, 35.250 seconds (milliseconds) |
 
-Parsing rules:
+The four-part format uses the current REAPER project's frame rate and supports its drop-frame mode. Frame numbers outside the project's valid range are not recognized. **Double-click the clock/timecode indicator** to seek to that ruler time, including the project's start-time offset. The original timecode text stays in the note. Unchecking **Recognize timecodes** disables timecode badges for the corresponding imported entries; manually created and older notes may be detected automatically.
 
-- Blank lines separate paragraphs. Numbered list entries may include continuation lines.
-- Without blank lines or recognized numbering, each nonempty line becomes a separate note.
-- Supported markers include `1.`, `2)`, `(3)`, `[4]`, `5:`, `6 —` and compound forms such as `1.2.`.
-- Numbers without punctuation require a consecutive sequence. Isolated numbers, years, dates and decimal values are retained when not recognized as list numbering.
-- **Remove numbering** is enabled by default.
-
-## View and language
+## View, spacing and language
 
 | Setting | Function |
 | --- | --- |
-| View → Hide completed | Hide completed checkbox notes without deleting them |
-| View → Completed notes last | Display completed checkbox notes after all other blocks in each column |
-| View → Color marker style | Left strip or a soft whole-note background tint |
-| Font, at the right of the top toolbar | Set note text size from 12 to 32 px |
-| View → theme | Select Pages, REAPER Grey, Google Docs White or Dark |
-| View → Language | Select English or Russian |
-| Toolbar context menu → Dock to docker | Dock or undock the window |
+| **View → Hide completed** | Hide completed checkbox notes without deleting them |
+| **View → Completed notes last** | Show completed notes at the end of each group (display order only) |
+| **View → Color marker style** | Left strip or whole-note tint |
+| **View → Note spacing** | Adjust the gap above and below note separators from 0 to 24 px; default **5 px**; **Reset spacing** restores the default |
+| **View → Pages / REAPER Grey / Google Docs White / Dark** | Select the interface theme |
+| **View → Language** | English or Russian interface |
+| **Font** slider | Note text size, 12–32 px, independently of the interface font |
+| **Dock to docker** | Dock/undock through the window's context menu |
 
-**Completed notes last** is retained between runs. Relative order within each group is preserved. Clearing a checkbox returns the note to its position among incomplete blocks. The setting affects display order only; saved block order is unchanged. Disabling it restores the original order.
-
-The font controls are aligned to the right edge of the top toolbar. In narrow windows, the complete group moves to the next row and remains right-aligned. The **Edit / Done** button matches the height of the note-owner selector.
-
-Interface font size is independent of note text size. Language changes apply to interface controls; document text and user-defined names are preserved.
+View preferences are saved between runs and do not create document Undo entries. The **Help** menu opens this README or the Russian README according to the selected interface language.
 
 ## Undo and Redo
-
-The **Edit** menu displays the next Undo and Redo actions.
 
 | Action | Windows / Linux | macOS |
 | --- | --- | --- |
 | Undo | Ctrl+Z | Cmd+Z |
 | Redo | Ctrl+Shift+Z or Ctrl+Y | Cmd+Shift+Z or Cmd+Y |
 
-History includes text edits, structural changes, completion states, dropdown selections, imports, color markers and restoration. Consecutive typing or deletion in the same field is grouped with a pause threshold of approximately 0.8 seconds. Caret movement, selection changes, paste, cut, replacement and line breaks separate editing operations.
+Undo/Redo covers text edits, completion states, dropdowns, imports, colors, group/tab changes, note moves and recovery restoration. It is independent for each note owner and is kept for the current script session. Histories are capped at 100 entries or approximately 16 MiB per stack; related typing is grouped using a short time interval. History resets on script restart or when external edits replace the loaded document.
 
-History is maintained independently for each note owner during the script session. Each stack retains up to 100 entries, subject to an approximate 16 MiB limit. Restarting the script or loading external changes resets the relevant history. Appearance settings are not included in document history.
+## Recovery and format compatibility
 
-## Recovery
+Invalid or unsupported structured notes open read-only instead of being silently overwritten. Conflicts with native notes stop automatic writing. Recovery copies may contain the original notes, an in-memory draft, attempted writes, pending dialog text and a diagnostic report.
 
-Malformed or unsupported structured notes are opened read-only. External changes are loaded when no local edits are pending. Conflicting changes suspend writing and display a diagnostic message.
-
-The recovery directory is:
+Recovery directory:
 
 ```text
 <REAPER resource directory>/Data/Patch34_Project_Notes_Recovery/
 ```
 
-Recovery files may include original notes, the local draft, pending dialog text and a diagnostic report.
+To restore, choose **Edit → Open recovery copy…**, inspect the selected `.notes` file in the preview and select **Restore**. Restoration supports Undo/Redo. Recovery copies can reflect incomplete operations, so review them first.
 
-To restore notes, select **Edit → Open recovery copy…**, open a `.notes` file, review the preview and select **Restore**. The copy replaces the current owner's document. Restoration supports Undo/Redo.
-
-## Format compatibility
-
-- Storage format: v2. Version v1 documents are converted on edit.
-- Color markers use optional `@color` directives. Versions through 0.5.3 open documents containing these directives read-only. Remove all markers in 0.5.9 before editing the document with an earlier version.
-- Legacy checkbox blocks remain supported.
-- Internal Patch34 storage keys are retained for compatibility with existing notes and settings.
+**ReaNotepad 0.6.0 writes document format v3**, with optional group header colors and imported timecode flags. Existing v1/v2 structured documents and plain-text notes remain readable. Opening an older document alone does not rewrite it, but edits save in the current format. Older script releases may not be able to edit documents saved by v0.6.0. Internal `Patch34` format headers, track-extension keys, preference keys and recovery paths are retained for compatibility.
 
 ## License and credits
 
 Author: [Aleksei Vorobev / Patch34](https://github.com/patch-34).
 
-ReaNotepad is distributed under the [MIT License](LICENSE).
-
-Interface: [ReaImGui](https://github.com/cfillion/reaimgui). Icons: [Lucide](https://lucide.dev/). Third-party icon licenses are included in [LUCIDE_LICENSE.txt](docs/licenses/LUCIDE_LICENSE.txt).
-
+ReaNotepad is released under the [MIT License](LICENSE). The interface uses [ReaImGui](https://github.com/cfillion/reaimgui); icons are from [Lucide](https://lucide.dev/). Third-party icon notices are included in [LUCIDE_LICENSE.txt](docs/licenses/LUCIDE_LICENSE.txt).
