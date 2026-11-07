@@ -4,7 +4,10 @@
 
 ReaNotepad is a structured notes editor for REAPER projects, tracks and media items. Keep edit lists, tasks, production notes and status fields in one window. Each document has horizontal tabs containing collapsible groups of notes. Notes are stored in the REAPER project rather than separate working files.
 
-![ReaNotepad in REAPER](assets/screenshot.png)
+<br>
+<p align="center">
+  <img src="assets/screenshot.png" alt="ReaNotepad в REAPER" width="600">
+</p>
 
 ## Requirements
 
