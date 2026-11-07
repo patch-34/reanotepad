@@ -86,12 +86,12 @@ Open **Edit → Import text…**, use **Add → Import text…**, or choose the 
 
 1. Select a destination group in the dialog.
 2. Paste the source text in the left pane and inspect the right-hand preview.
-3. Set **Remove numbering** and **Recognize timecodes** as needed.
+3. Set **Remove numbering** and **Split at timecodes** as needed.
 4. Click **Import**. All imported entries are added as unchecked checkbox notes in a single Undo step.
 
 Blank lines separate paragraphs; numbered entries can include continuation lines. Without blank lines or numbering, each nonempty line is a separate note. Numbering such as `1.`, `2)`, `(3)`, `[4]`, `5:`, `6 —` and `1.2.` is recognized; isolated years and ambiguous numbers are handled conservatively.
 
-When **Recognize timecodes** is enabled, a timecode at the **start** of a note can appear above it with a clock icon:
+**Split at timecodes** starts a new imported note at each recognized leading timecode. Independently of this option, recognized timecodes at the **start** of any note appear with a clock icon:
 
 | Example | Meaning |
 | --- | --- |
@@ -100,7 +100,7 @@ When **Recognize timecodes** is enabled, a timecode at the **start** of a note c
 | `00:01:35:04` | 1 minute, 35 seconds, 4 frames (`HH:MM:SS:FF`) |
 | `00:01:35.250` | 1 minute, 35.250 seconds (milliseconds) |
 
-The four-part format uses the current REAPER project's frame rate and supports its drop-frame mode. Frame numbers outside the project's valid range are not recognized. **Double-click the clock/timecode indicator** to seek to that ruler time, including the project's start-time offset. The original timecode text stays in the note. Unchecking **Recognize timecodes** disables timecode badges for the corresponding imported entries; manually created and older notes may be detected automatically.
+The four-part format uses the current REAPER project's frame rate and supports its drop-frame mode. Frame numbers outside the project's valid range are not recognized. **Double-click the clock/timecode indicator** to seek to that ruler time, including the project's start-time offset. The original timecode text stays in the note. The import splitting option does not disable timecode badges or navigation, including for notes imported with older versions.
 
 ## View, spacing and language
 
@@ -138,7 +138,7 @@ Recovery directory:
 
 To restore, choose **Edit → Open recovery copy…**, inspect the selected `.notes` file in the preview and select **Restore**. Restoration supports Undo/Redo. Recovery copies can reflect incomplete operations, so review them first.
 
-**ReaNotepad 0.6.0 writes document format v3**, with optional group header colors and imported timecode flags. Existing v1/v2 structured documents and plain-text notes remain readable. Opening an older document alone does not rewrite it, but edits save in the current format. Older script releases may not be able to edit documents saved by v0.6.0. Internal `Patch34` format headers, track-extension keys, preference keys and recovery paths are retained for compatibility.
+**ReaNotepad 0.6.1 writes document format v3**, with optional group header colors and preserved timecode metadata. Existing v1/v2 structured documents and plain-text notes remain readable. Opening an older document alone does not rewrite it, but edits save in the current format. Older script releases may not be able to edit documents saved by v0.6.1. Internal `Patch34` format headers, track-extension keys, preference keys and recovery paths are retained for compatibility.
 
 ## License and credits
 
