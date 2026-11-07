@@ -1,12 +1,12 @@
 -- @description ReaNotepad
--- @version 0.6.1
+-- @version 0.6.2
 -- @author Aleksei Vorobev / Patch34
 -- @link
 --   GitHub repository https://github.com/patch-34/reanotepad
 -- @changelog
---   Restore timecode badges and navigation for previously imported notes.
---   Timecode detection is independent of import splitting.
---   Clarify import toggle as Split at timecodes.
+--   Restore native ReaImGui tooltips with compact styling and a 0.4s delay.
+--   Apply Undo/Redo before drawing notes to prevent one-frame flicker.
+--   Correct tab creation history labels and remove obsolete UI strings.
 -- @about
 --   Structured notes for REAPER projects, tracks and media items.
 --   Horizontal tabs contain independently collapsible vertical groups.
@@ -33,7 +33,7 @@
 --                        https://cfillion.ca/reaper_imgui_doc.html
 
 local M = {}
-local VERSION = '0.6.1'
+local VERSION = '0.6.2'
 -- ============================================================================
 -- UI SETTINGS / НАСТРОЙКИ ИНТЕРФЕЙСА                        EDIT HERE
 -- ============================================================================
@@ -178,6 +178,11 @@ local UI_METRICS = {
   -- Dialogs and Popups / Диалоги и всплывающие окна.
   confirm_min_width=280, confirm_max_width=520,
   popup_margin=12, popup_footer_gap=8, popup_border_size=1.5,
+  -- Compact native ImGui tooltips with a 0.4 s hover delay.
+  -- Компактные нативные подсказки ImGui с задержкой 0,4 с.
+  tooltip_delay=0.4, tooltip_font_size=11,
+  tooltip_padding_x=5, tooltip_padding_y=3,
+  tooltip_rounding=0, tooltip_border_size=1,
   import_pane_min_height=56, options_panel_min_height=60,
   option_input_min_width=60, option_actions_reserved_width=110,
   about_pad_x=20, about_pad_y=17, about_rounding=12,
@@ -319,6 +324,8 @@ local UI_PALETTE = {
     button_border=rgba(230,230,230,80)},
   trash={text=rgba(146,74,74,255),text_hover=rgba(181,52,52,255),
     fill=rgba(146,74,74,14),fill_hover=rgba(181,52,52,48)},
+  tooltip={background=rgba(255,249,214,255),text=rgba(25,25,25,255),
+    border=rgba(47,43,32,255)},
   drag_note_highlight_fill_alpha=0.06, drag_note_highlight_edge_alpha=120,
   marker_tint_light=0.12, marker_tint_dark=0.18,
 }
@@ -1586,7 +1593,6 @@ local RU = {
   ["Paste text or a numbered list on the left. The notes to be added appear on the right."]="Вставь текст или нумерованный список слева. Справа появятся заметки, которые будут добавлены.",
   ["Separate paragraphs with a blank line. In a numbered list, start each new item on a new line."]="Разделяй абзацы пустой строкой. В нумерованном списке начинай каждый новый пункт с новой строки.",
   ["Source text"]="Исходный текст",
-  ["Destination tab"]="Вкладка для импорта",
   ["Paste text to see the resulting notes."]="Вставь текст, чтобы увидеть будущие заметки.",
   ["Undo"]="Отменить",
   ["Redo"]="Повторить",
@@ -1595,7 +1601,7 @@ local RU = {
   ["Move left"]="Сдвинуть влево",
   ["Move right"]="Сдвинуть вправо",
   ["Delete tab..."]="Удалить вкладку…",
-  ["Column"]="Колонка", ["Tabs"]="Вкладки", ["New group"]="Новая группа",
+  ["Tabs"]="Вкладки", ["New group"]="Новая группа",
   ["Groups"]="Группы", ["Group"]="Группа", ["New group below"]="Новая группа ниже",
   ["Rename group"]="Переименовать группу", ["Delete group..."]="Удалить группу…",
   ["Delete group?"]="Удалить группу?", ["Delete this group and its contents?"]="Удалить эту группу вместе с содержимым?",
@@ -1608,14 +1614,9 @@ local RU = {
   ["Dropdown"]="Выпадающий список",
   ["Move up"]="Выше",
   ["Move down"]="Ниже",
-  ["Move to column"]="В другую колонку",
   ["Edit field..."]="Изменить поле…",
   ["Delete..."]="Удалить…",
   ["Edit..."]="Изменить…",
-  ["Rename column..."]="Переименовать колонку…",
-  ["Move column left"]="Колонку влево",
-  ["Move column right"]="Колонку вправо",
-  ["Delete column..."]="Удалить колонку…",
   ["Hide completed"]="Скрыть выполненные",
   ["Completed notes last"]="Выполненные в конце",
   ["Color marker style"]="Оформление цветовых меток",
@@ -1642,21 +1643,12 @@ local RU = {
   ["Split at timecodes"]="Разделять по таймкодам",
   ["No notes yet"]="Заметок пока нет",
   ["Drag to move note"]="Перетащи, чтобы переместить заметку",
-  ["Expand column"]="Развернуть колонку",
-  ["Minimize column"]="Свернуть колонку",
-  ["Columns"]="Колонки",
-  ["New column"]="Новая колонка",
   ["Notes"]="Заметки",
-  ["New tab below"]="Добавить вкладку ниже",
   ["Delete note by dropping here"]="Перетащи сюда заметку, чтобы удалить",
   ["Drop to delete"]="Удалить",
   ["Rename tab"]="Переименовать вкладку",
   ["Move to tab"]="Переместить во вкладку",
-  ["Drag or click an icon, then choose a tab."]="Перетащи значок или нажми его и выбери вкладку.",
-  ["Choose a tab. Esc cancels."]="Выбери вкладку. Esc — отмена.",
   ["Choose a group. Esc cancels."]="Выбери группу. Esc — отмена.",
-  ["Drag or click an icon, then choose a group."]="Перетащи значок или нажми его и выбери группу.",
-  ["Click a highlighted tab heading to add here."]="Нажми на подсвеченный заголовок вкладки, чтобы добавить сюда.",
   ["Click or drop into this tab to add here."]="Нажми или перетащи элемент в эту вкладку, чтобы добавить его.",
   ["Discard note changes?"]="Отменить изменения заметки?",
   ["The note has unsaved changes. Discard them?"]="В заметке есть несохранённые изменения. Отменить их?",
@@ -1669,17 +1661,13 @@ local RU = {
   ["Field name"]="Название поля",
   ["Options (select a circle to set the current value)"]="Варианты (отметь кружком текущее значение)",
   ["Edit dropdown"]="Редактирование списка",
-  ["Rename column"]="Название колонки",
   ["Delete item?"]="Удалить элемент?",
   ["Delete note?"]="Удалить заметку?",
   ["Delete this note and its contents?"]="Удалить эту заметку?",
   ["Delete tab?"]="Удалить вкладку?",
-  ["Delete column?"]="Удалить колонку?",
   ["Delete this tab and its contents?"]="Удалить эту вкладку вместе с содержимым?",
-  ["Delete this column and its contents?"]="Удалить эту колонку вместе с содержимым?",
   ["Import text"]="Импорт текста",
   ["Delete this item and its contents?"]="Удалить этот элемент вместе с содержимым?",
-  ["Empty column"]="Пустая колонка",
   ["Completed items hidden"]="Выполненные пункты скрыты",
   ["(Empty text block)"]="(Пустой текстовый блок)",
   ["Switching note owner..."]="Переключение заметок…",
@@ -2011,6 +1999,23 @@ local function styles()
   return count,var_count
 end
 UI={menu_open=nil,info=nil,open_info=nil,slider_state={},read_cache=setmetatable({},{__mode="k"})}
+-- Use the native item tooltip directly after the item. ImGui handles
+-- placement and text sizing; its hover timer is configured per context.
+function UI.item_tooltip(text)
+  if type(text)~='string' or text=='' then return end
+  local m=UI_METRICS
+  ImGui.PushFont(ctx,ui_font,m.tooltip_font_size)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,m.tooltip_padding_x,m.tooltip_padding_y)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowRounding,m.tooltip_rounding)
+  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowBorderSize,m.tooltip_border_size)
+  ImGui.PushStyleColor(ctx,ImGui.Col_PopupBg,UI_PALETTE.tooltip.background)
+  ImGui.PushStyleColor(ctx,ImGui.Col_Text,UI_PALETTE.tooltip.text)
+  ImGui.PushStyleColor(ctx,ImGui.Col_Border,UI_PALETTE.tooltip.border)
+  ImGui.SetItemTooltip(ctx,text)
+  ImGui.PopStyleColor(ctx,3)
+  ImGui.PopStyleVar(ctx,3)
+  ImGui.PopFont(ctx)
+end
 function UI.recovery_pending(owner,changed_only)
   local pending
   if owner==session and (tab_rename or modal) then pending=tab_rename or modal
@@ -2549,11 +2554,11 @@ function UI.timecode_badge(block)
   end
   ImGui.EndGroup(ctx)
   local hovered=ImGui.IsItemHovered(ctx)
-  ImGui.SetItemTooltip(ctx,tr('Timeline position')..': '..caption..'\n'..tr('Double-click to go to timecode'))
+  UI.item_tooltip(tr('Timeline position')..': '..caption..'\n'..tr('Double-click to go to timecode'))
   ImGui.PopFont(ctx)
   return hovered,true
 end
-function UI.quick_access_button(id,caption,kind,side,selected,instruction)
+function UI.quick_access_button(id,caption,kind,side,selected)
   local sx,sy=ImGui.GetCursorScreenPos(ctx)
   local clicked=UI.source_button('quick_'..id,'',side,side,selected)
   local image=UI.icon_image(kind)
@@ -2563,10 +2568,7 @@ function UI.quick_access_button(id,caption,kind,side,selected,instruction)
   ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),image,
     sx+offset,sy+offset,sx+offset+icon_side,sy+offset+icon_side,
     0,0,1,1,color)
-  local hint=tr(caption)
-  local detail=instruction and tr(instruction)
-  if detail and detail~=hint then hint=hint..'\n'..detail end
-  ImGui.SetItemTooltip(ctx,hint)
+  UI.item_tooltip(tr(caption))
   return clicked
 end
 -- Editing belongs to one existing block in one owner/document generation.
@@ -3342,12 +3344,12 @@ local function add_menu(column)
   if ImGui.MenuItem(ctx,ui_label('Text')) then add_from_menu('text',column) end
   if ImGui.MenuItem(ctx,ui_label('Dropdown')) then add_from_menu('select',column) end
 end
-local function add_column()
+local function add_tab()
   if not session or not session.doc or #session.doc.tabs>=8 then return end
   local board=M.tab(tr('Tab')..' '..(#session.doc.tabs+1))
   board.columns[1].name=tr('Group')..' 1'
   session.doc.tabs[#session.doc.tabs+1]=board;session.active=#session.doc.tabs
-  touch(nil,'add_column');undo_boundary=true
+  touch(nil,'add_tab');undo_boundary=true
 end
 -- Placement is owner/generation scoped. Only a completed target click or native
 -- payload delivery queues creation, and every destination is revalidated then.
@@ -3425,7 +3427,7 @@ function UI.drag_trash_target()
     ImGui.DrawList_AddText(dl,sx+label_x,sy+(height-ImGui.GetTextLineHeight(ctx))*0.5,
       ImGui.GetColorEx(ctx,color),tr('Drop to delete'))
   end
-  ImGui.SetItemTooltip(ctx,tr('Delete note by dropping here'))
+  UI.item_tooltip(tr('Delete note by dropping here'))
   if ImGui.BeginDragDropTarget(ctx) then
     local flags=ImGui.DragDropFlags_AcceptBeforeDelivery|ImGui.DragDropFlags_AcceptNoDrawDefaultRect
     local accepted,token=ImGui.AcceptDragDropPayload(ctx,'P34_NOTE',nil,flags)
@@ -3454,13 +3456,13 @@ function UI.creation_toolbar()
   if dragging then UI.drag_trash_target() else ImGui.Dummy(ctx,side,side) end
   ImGui.SameLine(ctx,0,gap)
   if not dragging and enabled then
-    if UI.quick_access_button('create_group','New group','pencil',side,false,'New group') then
+    if UI.quick_access_button('create_group','New group','pencil',side,false) then
       local board=active_tab()
       if board then UI.add_section(board,board.columns[#board.columns]) end
     end
   else
     ImGui.BeginDisabled(ctx,true)
-    UI.quick_access_button('create_group','New group','pencil',side,false,'New group')
+    UI.quick_access_button('create_group','New group','pencil',side,false)
     ImGui.EndDisabled(ctx)
   end
   ImGui.BeginDisabled(ctx,not enabled or dragging)
@@ -3469,7 +3471,7 @@ function UI.creation_toolbar()
     ImGui.SameLine(ctx,0,gap)
     local p=UI.place
     local clicked=UI.quick_access_button('create_'..action[1],action[2],action[1],side,
-      p and p.kind==action[1],'Drag or click an icon, then choose a group.')
+      p and p.kind==action[1])
     -- Read the actual rectangle immediately: dragging tooltips/popups may
     -- change the ImGui last-item record later in this loop iteration.
     if action[1]=='import' then
@@ -3558,7 +3560,7 @@ function UI.placement_target(section,sx,sy,width,bottom,role,activated,visual)
     hovered=mx>=sx and mx<sx+width and my>=sy and my<bottom
       and mx>=wx and mx<wx+ww and my>=wy and my<wy+wh
     if visual then UI.note_highlight(visual.x,visual.y,visual.width,visual.bottom) end
-    if hovered then ImGui.SetItemTooltip(ctx,tr('Click or drop into this tab to add here.')) end
+    if hovered then UI.item_tooltip(tr('Click or drop into this tab to add here.')) end
   end
   if p.mode=='click' then
     if (role=='restore' and activated or role~='restore' and hovered and ImGui.IsMouseReleased(ctx,0)) then
@@ -3614,8 +3616,6 @@ local HISTORY_ACTIONS = {
   delete_note={'delete note','удаление заметки'},move_note={'move note','перемещение заметки'},
   add_dropdown={'add dropdown','добавление списка'},add_tab={'add tab','добавление вкладки'},
   delete_tab={'delete tab','удаление вкладки'},rename_tab={'rename tab','переименование вкладки'},move_tab={'move tab','перемещение вкладки'},
-  add_column={'add column','добавление колонки'},delete_column={'delete column','удаление колонки'},
-  rename_column={'rename column','переименование колонки'},move_column={'move column','перемещение колонки'},
   import={'import','импорт'},restore={'recovery restore','восстановление'},
 }
 function UI.history_caption(direction)
@@ -3659,7 +3659,7 @@ local function menu_bar()
     ImGui.EndPopup(ctx)
   end
   if UI.begin_menu('Tabs',enabled) then
-    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_column() end
+    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_tab() end
     ImGui.Separator(ctx)
     for index,board in ipairs(session.doc.tabs) do
       if ImGui.BeginMenu(ctx,label(board.name)..'##board_menu_'..board.id) then
@@ -3676,7 +3676,7 @@ local function menu_bar()
       local board=active_tab()
       UI.add_section(board,board.columns[#board.columns])
     end
-    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_column() end
+    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_tab() end
     ImGui.EndPopup(ctx)
   end
   if UI.begin_menu('View') then
@@ -3894,7 +3894,7 @@ function UI.block_action_button(block)
     local tint=ImGui.GetColor(ctx,ImGui.Col_Text)
     ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),icon,
       ix,iy,ix+side,iy+side,0,0,1,1,tint)
-    ImGui.SetItemTooltip(ctx,tr('Color marker'))
+    UI.item_tooltip(tr('Color marker'))
     if clicked then ImGui.OpenPopup(ctx,'note_palette') end
   else
     ImGui.Dummy(ctx,width,height)
@@ -4279,7 +4279,7 @@ function UI.note_drag_handle(tab,column,block,sx,sy,bottom,gutter,first_line_cen
   ImGui.InvisibleButton(ctx,'##drag_note',width,height,ImGui.ButtonFlags_MouseButtonLeft)
   local color=ImGui.GetColor(ctx,ImGui.Col_TextDisabled)
   UI.draw_note_grip(ImGui.GetWindowDrawList(ctx),hx+width*0.5,center,width,height,color)
-  ImGui.SetItemTooltip(ctx,tr('Drag to move note'))
+  UI.item_tooltip(tr('Drag to move note'))
   if not UI.drag_cancelled and not escape_pressed and not modal and not tab_rename and not UI.info and not history_request
       and startup_layout_frames>=STARTUP_LAYOUT_FRAMES and ImGui.BeginDragDropSource(ctx,0) then
     local drag=UI.note_drag_current()
@@ -4596,7 +4596,7 @@ function UI.heading_text(text,width,height,show_tooltip)
     ImGui.PopClipRect(ctx)
   end
   local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
-  if show_tooltip~=false then ImGui.SetItemTooltip(ctx,text) end
+  if show_tooltip~=false then UI.item_tooltip(text) end
   return hovered
 end
 -- Group actions are plain dots; the invisible native item keeps a stable
@@ -4909,9 +4909,9 @@ function UI.tabs_strip()
   local add_x=menu_x-gap-side
   ImGui.SetCursorScreenPos(ctx,add_x,control_y)
   ImGui.BeginDisabled(ctx,#session.doc.tabs>=8)
-  if UI.source_button('add_page','+',side,side) then add_column() end
+  if UI.source_button('add_page','+',side,side) then add_tab() end
   ImGui.EndDisabled(ctx)
-  ImGui.SetItemTooltip(ctx,tr('New tab'))
+  UI.item_tooltip(tr('New tab'))
   ImGui.SetCursorScreenPos(ctx,menu_x,control_y)
   if UI.source_button('page_actions','...',side,side) then ImGui.OpenPopup(ctx,'page_actions') end
   if begin_action_popup('page_actions') then
@@ -5205,9 +5205,9 @@ local function draw_modal()
         m.target.label=m.label;m.target.options=m.options;m.target.selected=m.selected
       end
       if m.kind~='delete' then
-        local action=({new_tab='add_tab',rename_column='rename_column',import='import',select='edit_dropdown',restore='restore'})[m.kind]
+        local action=({new_tab='add_tab',import='import',select='edit_dropdown',restore='restore'})[m.kind]
         if m.kind=='rename_column' then
-          action=m.title=='Rename group' and 'rename_group' or m.title=='Rename tab' and 'rename_tab' or action
+          action=m.title=='Rename tab' and 'rename_tab' or 'rename_group'
         end
         touch(nil,action)
       end
@@ -5350,6 +5350,48 @@ local function header_context()
     ImGui.EndPopup(ctx)
   end
 end
+-- Commit any pending editor draft before applying history. Normal in-frame
+-- changes continue to use this same write path after rendering.
+local function commit_frame_changes(before)
+  if not (changed and session) then return end
+  session.dirty=true
+  local ok,err=M.write(session,api)
+  if not ok then
+    session.error=err;save_recovery(session,err,before and before.raw)
+  else
+    if session.restore_pending then before.allow_invalid=true;session.restore_pending=nil end
+    session.history_readonly=nil
+    M.history_record(session.history,before,session.raw,edit_key,reaper.time_precise(),edit_action)
+    session.undo_due=reaper.time_precise()+0.8
+  end
+  -- A draft committed before Undo must not be recorded a second time
+  -- when the rest of this frame is rendered.
+  changed=false;edit_key=nil;edit_action=nil
+end
+
+local function apply_history_request(before)
+  local direction=history_request
+  history_request=nil
+  if not direction or not can_history(direction) then return false end
+  flush_undo(session)
+  local ok,err=M.history_step(session,api,direction)
+  if ok then
+    epoch=epoch+1;bulk_selection=nil;modal=nil;open_modal=nil;tab_rename=nil;session.pending=nil
+    force_tab=session.doc and active_tab().id or nil
+    -- These interactions belonged to the previous document generation.
+    -- Invalidate them now, before this frame draws the restored notes.
+    if UI.place then UI.place=nil;UI.place_cancelled=true end
+    if UI.note_drag then UI.note_drag=nil;UI.drag_cancelled=true end
+    UI.tab_gesture=nil;UI.tab_press=nil;UI.column_press=nil
+    reaper.Undo_OnStateChangeEx2(session.proj,
+      direction<0 and 'Undo '..session.target.kind..' notes' or 'Redo '..session.target.kind..' notes',
+      session.target.undo_flags,-1)
+  elseif err then
+    session.error=err;save_recovery(session,err,before and before.raw)
+  end
+  return ok
+end
+
 local function frame()
   frame_checkpoint=nil
   changed=false; undo_boundary=false; edit_key=nil; edit_action=nil; history_request=nil
@@ -5377,6 +5419,11 @@ local function frame()
   if not ctx then
     ctx=ImGui.CreateContext(CONTEXT_NAME,ImGui.ConfigFlags_DockingEnable|ImGui.ConfigFlags_NavEnableKeyboard)
     ImGui.SetConfigVar(ctx,ImGui.ConfigVar_InputTextCursorBlink,1)
+    -- Native SetItemTooltip uses these per-context settings: 0.4s with
+    -- a fresh delay for each item instead of sharing it between buttons.
+    ImGui.SetConfigVar(ctx,ImGui.ConfigVar_HoverDelayNormal,UI_METRICS.tooltip_delay)
+    ImGui.SetConfigVar(ctx,ImGui.ConfigVar_HoverFlagsForTooltipMouse,
+      ImGui.HoveredFlags_DelayNormal|ImGui.HoveredFlags_NoSharedDelay|ImGui.HoveredFlags_AllowWhenDisabled)
     font=ImGui.CreateFont(UI_METRICS.font_family)
     ImGui.Attach(ctx,font)
     -- A real bold face (not a duplicated text shadow) for column names.
@@ -5414,6 +5461,19 @@ local function frame()
     menu_bar()
     local switching=scope_selector()
     if switching or history_request or modal or tab_rename or UI.info then UI.end_note_edit() end
+    if history_request then
+      -- Commands are selected during menu_bar/history_shortcuts. Applying
+      -- them only after ImGui.End drew the old document one frame too long.
+      commit_frame_changes(before)
+      local applied=apply_history_request(before)
+      if applied then
+        -- The previous epoch was pushed before menu_bar. Re-scope the
+        -- document widgets now so both the data and ImGui IDs agree.
+        ImGui.PopID(ctx)
+        ImGui.PushID(ctx,epoch)
+      end
+      before=session and {raw=session.raw,active=session.active,allow_invalid=session.history_readonly} or nil
+    end
     header_context()
     if switching then UI.place=nil else UI.creation_toolbar() end
     if switching then ImGui.TextDisabled(ctx,tr('Switching note owner...'))
@@ -5440,31 +5500,9 @@ local function frame()
     startup_layout_frames=startup_layout_frames+1
     ImGui.PopStyleVar(ctx)
   end
-  if changed and session then
-    session.dirty=true
-    local ok,err=M.write(session,api)
-    if not ok then
-      session.error=err;save_recovery(session,err,before and before.raw)
-    else
-      if session.restore_pending then before.allow_invalid=true;session.restore_pending=nil end
-      session.history_readonly=nil
-      M.history_record(session.history,before,session.raw,edit_key,reaper.time_precise(),edit_action)
-      session.undo_due=reaper.time_precise()+0.8
-    end
-  end
+  commit_frame_changes(before)
   if session and (undo_boundary or not UI.note_edit) then session.history.key=nil end
   if session and (undo_boundary or (session.undo_due and reaper.time_precise()>=session.undo_due)) then flush_undo(session) end
-  if history_request and can_history(history_request) then
-    flush_undo(session)
-    local ok,err=M.history_step(session,api,history_request)
-    if ok then
-      epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; tab_rename=nil; session.pending=nil
-      force_tab=session.doc and active_tab().id or nil
-      reaper.Undo_OnStateChangeEx2(session.proj,history_request<0 and 'Undo '..session.target.kind..' notes' or 'Redo '..session.target.kind..' notes',session.target.undo_flags,-1)
-    elseif err then
-      session.error=err;save_recovery(session,err,before and before.raw)
-    end
-  end
   return opened
 end
 local function exit()
