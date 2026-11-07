@@ -9,8 +9,6 @@ ReaNotepad — редактор структурированных замето�
   <img src="assets/screenshot-ru.png" alt="ReaNotepad в REAPER" width="600">
 </p>
 
-
-
 ## Требования
 
 | Компонент | Версия |
