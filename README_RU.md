@@ -5,7 +5,7 @@
 ReaNotepad — редактор структурированных заметок для проектов, дорожек и айтемов REAPER. Он подходит для списков правок, задач, рабочих заметок и статусов. Документ состоит из горизонтальных вкладок, внутри которых находятся сворачиваемые группы заметок. Данные хранятся в проекте REAPER, без отдельных рабочих файлов.
 
 <p align="center">
-  <img src="assets/screenshot-ru.png" alt="ReaNotepad в REAPER" width="500">
+  <img src="assets/screenshot-ru.png" alt="ReaNotepad в REAPER" width="600">
 </p>
 
 
