@@ -141,7 +141,7 @@ Recovery directory:
 
 To restore, choose **Edit → Open recovery copy…**, inspect the selected `.notes` file in the preview and select **Restore**. Restoration supports Undo/Redo. Recovery copies can reflect incomplete operations, so review them first.
 
-**ReaNotepad 0.6.1 writes document format v3**, with optional group header colors and preserved timecode metadata. Existing v1/v2 structured documents and plain-text notes remain readable. Opening an older document alone does not rewrite it, but edits save in the current format. Older script releases may not be able to edit documents saved by v0.6.1. Internal `Patch34` format headers, track-extension keys, preference keys and recovery paths are retained for compatibility.
+**ReaNotepad 0.6.2 writes document format v3**, with optional group header colors and preserved timecode metadata. Existing v1/v2 structured documents and plain-text notes remain readable. Opening an older document alone does not rewrite it, but edits save in the current format. Older script releases may not be able to edit documents saved by v0.6.2. Internal `Patch34` format headers, track-extension keys, preference keys and recovery paths are retained for compatibility.
 
 ## License and credits
 
