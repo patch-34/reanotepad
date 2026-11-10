@@ -2,149 +2,70 @@
 
 **English** · [Русский](README_RU.md)
 
-ReaNotepad is a structured notes editor for REAPER projects, tracks and media items. Keep edit lists, tasks, production notes and status fields in one window. Each document has horizontal tabs containing collapsible groups of notes. Notes are stored in the REAPER project rather than separate working files.
+ReaNotepad is a single-file Lua notes editor for REAPER projects, tracks, and media items. Organize editing lists, production notes, task checklists and status fields into horizontal tabs and collapsible groups. Changes are stored in the REAPER project, not in separate working documents.
 
-<br>
-<p align="center">
-  <img src="assets/screenshot.png" alt="ReaNotepad в REAPER" width="600">
-</p>
+<p align="center"><img src="https://raw.githubusercontent.com/patch-34/reanotepad/main/assets/screenshot.png" alt="ReaNotepad in REAPER" width="550"></p>
 
-## Requirements
+## Requirements and installation
 
-| Component | Version |
-| --- | --- |
-| REAPER | 7 or later |
-| ReaImGui | 0.10 or later |
+- **REAPER 7+** and **ReaImGui 0.10+**. Install ReaImGui using [ReaPack](https://reapack.com/). SWS is not required.
+- Save `ReaNotepad.lua` to your REAPER `Scripts` directory. Use **Options → Show REAPER resource path** to locate it.
+- In **Actions → Show action list**, choose the **Main** section, then **New action → Load ReaScript**, choose `ReaNotepad.lua`, and run the action.
+- When updating, **replace the existing `ReaNotepad.lua` without renaming it**. This preserves registered REAPER actions, shortcuts and toolbar assignments.
 
-Install ReaImGui through [ReaPack](https://reapack.com/). SWS is not required.
-
-## Installation
-
-1. Install ReaImGui through ReaPack.
-2. Download `ReaNotepad.lua` from the release and place it in your REAPER `Scripts` folder. Find the resource folder via **Options → Show REAPER resource path in explorer/finder**.
-3. Open **Actions → Show action list** and select the **Main** section.
-4. Choose **New action → Load ReaScript**, select `ReaNotepad.lua`, then run the registered action.
-
-ReaNotepad is also maintained in the [Patch34 Scripts ReaPack repository](https://raw.githubusercontent.com/patch-34/patch34-reapack/main/index.xml). Its index is updated separately from this GitHub repository, so the version shown in ReaPack may differ temporarily.
-
-## Updating
-
-Replace the existing `ReaNotepad.lua` in the same location. Keep that filename unchanged to retain REAPER action IDs, shortcuts and toolbar assignments. You do not need to register the action again. Save a backup of important REAPER projects before editing them in a new major document format.
+The [Patch34 ReaPack repository](https://raw.githubusercontent.com/patch-34/patch34-reapack/main/index.xml) is maintained separately and may show a different version until its index is updated.
 
 ## Documents and storage
 
-Use the owner selector at the top to switch between three scopes:
-
 | Scope | Owner | Storage |
 | --- | --- | --- |
-| Project | Current REAPER project | Native project notes |
-| Track | One selected track, including the master track | Track extension data in the `.rpp` project |
-| Item | One selected media item | Native item notes |
+| Project | Current REAPER project | Native project notes (`GetSetProjectNotes`) |
+| Track | Exactly one selected track, including master | `P_EXT:PATCH34_PROJECT_NOTES` in the `.rpp` project |
+| Item | Exactly one selected media item | Native `P_NOTES` |
 
-In Track and Item modes, the editor follows the selection in REAPER and requires exactly one selected track or item. Every owner has its own tabs, groups and session Undo/Redo history. Changes are written into the open project; **save the REAPER project** to make them persistent on disk.
+Use the scope selector in the toolbar. Each owner has its own document and script-session Undo/Redo. Save your REAPER project to persist edits to disk. Existing plain-text notes are read without rewriting them until you make an edit.
 
-Existing plain-text notes are imported into the document without changing their native contents until the first edit.
+The editor supports up to eight horizontal tabs per document. Each tab contains collapsible, independently named **groups** with text notes, checkbox notes and named dropdown lists. Reorder tabs and notes by dragging. Move notes between groups via drag-and-drop or the actions menu.
 
-## Tabs, groups and notes
+## Creating and editing notes
 
-A document has up to eight **horizontal tabs**. Each tab contains **vertical groups** with their own heading, disclosure arrow and notes. Only the active tab is shown.
+- Use the top toolbar or **Add** menu for text notes, checkbox notes, dropdowns and text import. Click an icon and select a group, or drag it onto a group.
+- Use the light **circle-plus** icon at the bottom of an expanded group to create an unchecked checkbox note directly in that group.
+- Open a note's frameless **…** menu to edit its actions, set or clear a color marker, add/remove its checkbox when applicable, move it or delete it. Group headings use the same three-dot visual style and alignment.
+- Click text to edit in place: **Enter** saves, **Shift+Enter** inserts a newline, **Esc** prompts before discarding changed text. Clicking outside applies the edit.
+- Click a checkbox to toggle completion; click a dropdown value to select it. The dropdown's **…** menu provides its editing options.
+- The six-dot handle moves a note. Dragging to the top toolbar's trash target removes it. Deletion and bulk changes are covered by Undo/Redo as appropriate.
+- Group **…** actions include renaming, group color, moving up/down, inserting another group, multi-selection, and deletion. The final group in a tab cannot be deleted.
 
-| Action | How to do it |
+## Selection and appearance
+
+Group **… → Select elements…** enables selecting multiple visible notes. The selection toolbar can select all, clear, recolor or delete. It does not change note ownership or completion flags.
+
+**View** settings include hiding completed notes, displaying completed notes last, colored left strips versus whole-note tint, separator spacing (0–24 px, default 5 px), four interface themes (Pages, REAPER Grey, Google Docs White and Dark), and English/Russian language. Note font size is 12–32 px. Font size and separator spacing use native ReaImGui sliders, displaying `px` in both languages. Appearance settings are not part of document Undo history.
+
+## Import and timecodes
+
+Choose **Edit → Import text…**. Paste a text or numbered list, choose its target group and review the preview. Options include **Remove numbering** and **Split at timecodes**. Import is a single Undo operation. Recognized numbering includes `1.`, `2)`, `(3)`, `[4]`, `5:`, `6 —`, and hierarchical numbering.
+
+Leading timecodes in notes are recognized independently of the import splitting option:
+
+| Input | Interpretation |
 | --- | --- |
-| Create a tab | **Tabs → New tab** or the **+** beside the tab strip |
-| Switch tabs | Click a tab or choose it in the **Tabs** menu |
-| Reorder tabs | Drag tabs left or right, or use their context menu |
-| Rename a tab | Double-click its title, or use its context menu |
-| Delete a tab | Right-click the tab → **Delete tab…** (the last tab cannot be deleted) |
-| Create a group | **Add → New group**, the top toolbar's group icon, or **New group below** in a group menu |
-| Collapse/expand a group | Click its disclosure arrow |
-| Rename, reorder or delete a group | Open its **…** menu; double-click its title to rename |
-| Color a group heading | Group **… → Group header color** |
+| `01:45` | MM:SS |
+| `00:00:12` | HH:MM:SS |
+| `00:01:35:04` | HH:MM:SS:FF at the current project frame rate |
+| `00:01:35.250` | Time with milliseconds |
 
-A group can contain multiline text notes, notes with completion checkboxes, and named dropdown fields with editable choices. Hover over the icons in the top toolbar for tooltips. To create an element, **drag its icon onto a group**, or **click the icon and then choose a group**; Esc cancels placement. The **Add** menu also creates notes in the active group. Import opens a separate dialog.
+**Single-click the timecode badge** to move the REAPER edit cursor and focus the arrange context, so the Space key can start playback. The project start-time offset is respected. Four-field timecodes use the project's FPS and drop-frame setting. The original text remains unchanged.
 
-Drag a note by the grip at its left edge to reorder it or move it into another group or tab. During a drag, the top toolbar displays a trash target for deletion. Individual note menus also offer **Move up**, **Move down**, **Move to group**, **Color marker** and **Delete…**.
+## Undo, recovery and compatibility
 
-### Editing text and dropdowns
+Undo/Redo supports text edits, checkboxes, dropdowns, imports, colors, tab/group changes, note moves and recovery restoration. Each owner has a separate history, limited to 100 entries or approximately 16 MiB per stack. Short consecutive typing can be grouped. History does not persist across script restarts.
 
-Click a text note to edit it in place. **Enter** applies the edit, **Shift+Enter** inserts a line break, and clicking outside applies the edit. **Esc** asks for confirmation before discarding changed text. Read-mode text wraps visually without changing the saved line breaks.
+If native notes change externally during an edit, automatic writes pause rather than overwrite them. Invalid or unknown structured formats open read-only. Inspect recovery files under `Data/Patch34_Project_Notes_Recovery/` and restore using **Edit → Open recovery copy…**.
 
-Click a checkbox to mark a note complete. Select a dropdown value directly from its menu. Click a dropdown's name to reveal **Edit…** beside it, or use **… → Edit field…**, to change its name, options, order and current value. An individual note edit is one Undo step.
-
-## Multiple selection
-
-Open a group's **… → Select elements…** command, then click notes to select or deselect them. The selection toolbar provides **All / Clear selection**, **Color…**, **Delete…** and **Done**. Deletion asks for confirmation; bulk color changes and deletions each form one Undo step.
-
-Only visible notes can be selected. Leaving selection mode, switching tabs or note owners, and Undo/Redo clear the selection. Esc exits selection mode, unless a confirmation dialog is open.
-
-## Color markers
-
-Use a note's **Color marker** menu or the selection toolbar's **Color…** action. Available colors are red, orange, yellow, green, blue and purple; **No marker** removes the color. In **View → Color marker style**, choose a left strip or a subtle whole-note background tint. Group heading colors are set independently in the group's menu.
-
-Marker changes are stored with the document and support Undo/Redo. Changing the global display style does not change document contents.
-
-## Text import and timecodes
-
-Open **Edit → Import text…**, use **Add → Import text…**, or choose the import icon in the toolbar and select the destination group.
-
-1. Select a destination group in the dialog.
-2. Paste the source text in the left pane and inspect the right-hand preview.
-3. Set **Remove numbering** and **Split at timecodes** as needed.
-4. Click **Import**. All imported entries are added as unchecked checkbox notes in a single Undo step.
-
-Blank lines separate paragraphs; numbered entries can include continuation lines. Without blank lines or numbering, each nonempty line is a separate note. Numbering such as `1.`, `2)`, `(3)`, `[4]`, `5:`, `6 —` and `1.2.` is recognized; isolated years and ambiguous numbers are handled conservatively.
-
-**Split at timecodes** starts a new imported note at each recognized leading timecode. Independently of this option, recognized timecodes at the **start** of any note appear with a clock icon:
-
-| Example | Meaning |
-| --- | --- |
-| `01:45` | 1 minute, 45 seconds (`MM:SS`) |
-| `00:00:12` | 12 seconds (`HH:MM:SS`) |
-| `00:01:35:04` | 1 minute, 35 seconds, 4 frames (`HH:MM:SS:FF`) |
-| `00:01:35.250` | 1 minute, 35.250 seconds (milliseconds) |
-
-The four-part format uses the current REAPER project's frame rate and supports its drop-frame mode. Frame numbers outside the project's valid range are not recognized. **Double-click the clock/timecode indicator** to seek to that ruler time, including the project's start-time offset. The original timecode text stays in the note. The import splitting option does not disable timecode badges or navigation, including for notes imported with older versions.
-
-## View, spacing and language
-
-| Setting | Function |
-| --- | --- |
-| **View → Hide completed** | Hide completed checkbox notes without deleting them |
-| **View → Completed notes last** | Show completed notes at the end of each group (display order only) |
-| **View → Color marker style** | Left strip or whole-note tint |
-| **View → Note spacing** | Adjust the gap above and below note separators from 0 to 24 px; default **5 px**; **Reset spacing** restores the default |
-| **View → Pages / REAPER Grey / Google Docs White / Dark** | Select the interface theme |
-| **View → Language** | English or Russian interface |
-| **Font** slider | Note text size, 12–32 px, independently of the interface font; double-click the slider to reset it to 16 px |
-| **Dock to docker** | Dock/undock through the window's context menu |
-
-View preferences are saved between runs and do not create document Undo entries. The **Help** menu opens this README or the Russian README according to the selected interface language.
-
-## Undo and Redo
-
-| Action | Windows / Linux | macOS |
-| --- | --- | --- |
-| Undo | Ctrl+Z | Cmd+Z |
-| Redo | Ctrl+Shift+Z or Ctrl+Y | Cmd+Shift+Z or Cmd+Y |
-
-Undo/Redo covers text edits, completion states, dropdowns, imports, colors, group/tab changes, note moves and recovery restoration. It is independent for each note owner and is kept for the current script session. Histories are capped at 100 entries or approximately 16 MiB per stack; related typing is grouped using a short time interval. History resets on script restart or when external edits replace the loaded document.
-
-## Recovery and format compatibility
-
-Invalid or unsupported structured notes open read-only instead of being silently overwritten. Conflicts with native notes stop automatic writing. Recovery copies may contain the original notes, an in-memory draft, attempted writes, pending dialog text and a diagnostic report.
-
-Recovery directory:
-
-```text
-<REAPER resource directory>/Data/Patch34_Project_Notes_Recovery/
-```
-
-To restore, choose **Edit → Open recovery copy…**, inspect the selected `.notes` file in the preview and select **Restore**. Restoration supports Undo/Redo. Recovery copies can reflect incomplete operations, so review them first.
-
-**ReaNotepad 0.6.2 writes document format v3**, with optional group header colors and preserved timecode metadata. Existing v1/v2 structured documents and plain-text notes remain readable. Opening an older document alone does not rewrite it, but edits save in the current format. Older script releases may not be able to edit documents saved by v0.6.2. Internal `Patch34` format headers, track-extension keys, preference keys and recovery paths are retained for compatibility.
+**Version 0.7.0 continues to write document format v3** (`# Patch34 Project Notes v3`). Legacy v1/v2 documents and plain project notes remain readable. Track storage keys, preference keys, window identifiers and recovery paths have *not* been renamed. Older scripts may not edit documents saved in v3.
 
 ## License and credits
 
-Author: [Aleksei Vorobev / Patch34](https://github.com/patch-34).
-
-ReaNotepad is released under the [MIT License](LICENSE). The interface uses [ReaImGui](https://github.com/cfillion/reaimgui); icons are from [Lucide](https://lucide.dev/). Third-party icon notices are included in [LUCIDE_LICENSE.txt](docs/licenses/LUCIDE_LICENSE.txt).
+Copyright © 2026 Aleksei Vorobev / [Patch34](https://github.com/patch-34). Licensed under [MIT](LICENSE). Uses [ReaImGui](https://github.com/cfillion/reaimgui) and [Lucide](https://lucide.dev/) icons; see [third-party notices](docs/licenses/LUCIDE_LICENSE.txt).

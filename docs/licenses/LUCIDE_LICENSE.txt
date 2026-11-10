@@ -1,3 +1,6 @@
+Lucide icons: https://github.com/lucide-icons/lucide
+Original paths: type, square-check, list-chevrons-down-up, file-input, palette, trash, x, pencil, check, clock, grip-vertical, circle-plus.
+Rendered with a 1.5 px stroke at 24 px; white alpha masks are tinted by the UI.
 ISC License
 
 Copyright (c) 2026 Lucide Icons and Contributors

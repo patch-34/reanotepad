@@ -1,12 +1,13 @@
 -- @description ReaNotepad
--- @version 0.6.2
+-- @version 0.7.0
 -- @author Aleksei Vorobev / Patch34
 -- @link
 --   GitHub repository https://github.com/patch-34/reanotepad
 -- @changelog
---   Restore native ReaImGui tooltips with compact styling and a 0.4s delay.
---   Apply Undo/Redo before drawing notes to prevent one-frame flicker.
---   Correct tab creation history labels and remove obsolete UI strings.
+--   Release 0.7.0: shared note/group action alignment and frameless menus.
+--   Add group quick-add checkbox note and note checkbox toggle actions.
+--   Unify font/spacing sliders, timecode navigation and timeline focus.
+--   Stabilize ImGui scope pairing, note ordering and UI state handling.
 -- @about
 --   Structured notes for REAPER projects, tracks and media items.
 --   Horizontal tabs contain independently collapsible vertical groups.
@@ -33,7 +34,7 @@
 --                        https://cfillion.ca/reaper_imgui_doc.html
 
 local M = {}
-local VERSION = '0.6.2'
+local VERSION = '0.7.0'
 -- ============================================================================
 -- UI SETTINGS / НАСТРОЙКИ ИНТЕРФЕЙСА                        EDIT HERE
 -- ============================================================================
@@ -49,11 +50,12 @@ local VERSION = '0.6.2'
 local UI_METRICS = {
   -- Typography / Типографика: main UI font is independent of note text size slider.
   font_family='sans-serif', font_size=13, -- font_size is runtime-only
-  column_heading_bold=true, tab_heading_extra_px=0, tab_arrow_extra_px=5,
+  tab_heading_extra_px=0, tab_arrow_extra_px=5,
   note_text_min_size=12, note_text_max_size=32, note_text_default_size=16,
 
   -- Main window / Основное окно.
   window_initial_width=545, window_initial_height=615,
+  startup_layout_warmup_frames=2, startup_layout_warmup_alpha=0.001,
   window_min_width=540, window_min_height=360,
   menu_bar_height=38, menu_bar_pad_x=4,
   menu_trigger_pad_x=8, menu_label_min_inset_x=6, menu_label_min_inset_y=1,
@@ -72,7 +74,7 @@ local UI_METRICS = {
   -- Buttons and Controls / Кнопки и элементы управления.
   button_pad_x=8, button_pad_y=3, button_min_height=23,
   compact_button_pad_x=10, button_rounding=3,
-  scope_min_width=110, column_name_min_width=60,
+  scope_min_width=110,
   dropdown_width=420, dropdown_visible_rows=8, dropdown_popup_extra_height=16,
   button_border_size=1,
   quick_icon_size=16, quick_icon_total_inset=7,
@@ -95,7 +97,7 @@ local UI_METRICS = {
   tabs_strip_height=38, tabs_strip_pad_x=8, tabs_strip_pad_y=4,
   tabs_strip_label_pad_x=14, tabs_strip_gap=4, tabs_strip_min_width=56,
   tabs_strip_button_gap=8, tabs_strip_active_line=2,
-  tabs_drag_threshold=6, tabs_drop_line_width=2,
+  pointer_drag_threshold=6, tabs_drop_line_width=2,
   tabs_drag_scroll_edge=24, tabs_drag_scroll_speed=360, -- pixels/second
   -- Minimum safe inset when the shared anchor is unavailable or too far right.
   -- Минимальный защитный отступ; не самостоятельный сдвиг относительно панели.
@@ -104,31 +106,22 @@ local UI_METRICS = {
   -- Extra air between horizontal tab strip and the first group heading.
   -- Воздух сверху: первая группа не прижимается к панели вкладок.
   group_panel_top_padding=12,
-  -- This inset moves the group heading AND its menu together.
-  -- Сдвигает весь заголовок вместе с кнопкой «…», без разрыва фона.
-  group_header_min_height=26, group_header_right_inset=0,
-  -- Plain three-dot group menu / Три тонкие точки без рамки кнопки.
-  -- right_inset moves ONLY the painted dots, keeping the click target aligned.
-  -- right_inset сдвигает только рисунок точек, не область нажатия.
+  -- Group headings use the same right-action guide as every note.
+  group_header_min_height=26,
+  -- One centered three-dot icon for both group and note action hitboxes.
   group_menu_dot_radius=1.0, group_menu_dot_spacing=4.6,
-  group_menu_dots_right_inset=13,
-  -- Legacy column heading metrics are retained as inert compatibility settings.
-  -- Columns / Колонки: heading / заголовок колонки (fixed above the scrolling body).
-  column_heading_pad_x=1, column_heading_pad_y=4,
-  column_heading_height_extra=8, column_heading_indent=5,
-  column_heading_add_min_space=40,
-
-  -- Tabs / Вкладки: heading / заголовок внутри колонки.
+  -- Inline quick-add at the bottom of each expanded group.
+  -- circle-plus is an embedded Lucide icon, with click area independent of its image.
+  group_add_note_size=36, group_add_note_icon_size=25,
+  group_add_note_idle_alpha=0.55, group_add_note_hover_alpha=0.72,
+  group_add_note_top_gap=12, group_add_note_bottom_gap=8,
+  group_add_note_empty_top_gap=16,
+  -- Group heading (historically an internal column header).
   tab_heading_menu_gap=4, tab_heading_min_title=18,
   tab_heading_arrow_text_gap=2, tab_heading_hover_alpha=0.85,
-  tab_rename_min_width=12, tab_rename_pad_x=3, tab_rename_pad_y=1,
-  tab_rename_inset_x=4, tab_rename_inset_y=2,
 
-  -- Font slider / Ползунок размера текста заметок.
-  slider_width=140, slider_min_width=64, slider_row_height=22,
-  slider_knob_radius=6, slider_outline=1.5,
-  slider_track_height=3, slider_circle_segments=24,
-  slider_outline_normal=1.2,
+  -- Native sliders / Нативные ползунки (font and separator spacing).
+  slider_width=180, font_slider_min_width=100,
 
   -- Scrollbars / Скроллбары: overlay thumb / ползунок поверх содержимого.
   overlay_scroll_width=5, overlay_scroll_inset=3, overlay_scroll_margin=6,
@@ -153,8 +146,7 @@ local UI_METRICS = {
   marker_menu_offset_x=3, marker_menu_side=8, marker_menu_rounding=1,
   marker_menu_label_spaces=3, marker_menu_text_gap=6,
   selection_text_gutter=22, selection_min_height=23, selection_bottom_pad=4,
-  selection_rounding=2, selection_border_size=1,
-  selection_check_right_offset=18, selection_check_offset_y=2,
+  selection_rounding=2, selection_check_right_offset=18,
   editor_extra_pad_x=2, editor_extra_pad_y=2, editor_wrap_right_inset=2,
   editor_newline_selection_min_width=4, editor_caret_thickness=1, editor_tab_spaces=4,
   editor_caret_period=1.2, editor_caret_visible_time=0.6, -- seconds / секунды
@@ -174,15 +166,11 @@ local UI_METRICS = {
   trash_label_offset_x=30, trash_icon_label_gap=6,
   trash_border_size=1, trash_hover_border_size=2,
   drop_line_thickness=2, empty_tab_placement_height=38,
+  note_drag_scroll_edge=36, note_drag_scroll_speed=360,
 
   -- Dialogs and Popups / Диалоги и всплывающие окна.
   confirm_min_width=280, confirm_max_width=520,
   popup_margin=12, popup_footer_gap=8, popup_border_size=1.5,
-  -- Compact native ImGui tooltips with a 0.4 s hover delay.
-  -- Компактные нативные подсказки ImGui с задержкой 0,4 с.
-  tooltip_delay=0.4, tooltip_font_size=11,
-  tooltip_padding_x=5, tooltip_padding_y=3,
-  tooltip_rounding=0, tooltip_border_size=1,
   import_pane_min_height=56, options_panel_min_height=60,
   option_input_min_width=60, option_actions_reserved_width=110,
   about_pad_x=20, about_pad_y=17, about_rounding=12,
@@ -324,8 +312,6 @@ local UI_PALETTE = {
     button_border=rgba(230,230,230,80)},
   trash={text=rgba(146,74,74,255),text_hover=rgba(181,52,52,255),
     fill=rgba(146,74,74,14),fill_hover=rgba(181,52,52,48)},
-  tooltip={background=rgba(255,249,214,255),text=rgba(25,25,25,255),
-    border=rgba(47,43,32,255)},
   drag_note_highlight_fill_alpha=0.06, drag_note_highlight_edge_alpha=120,
   marker_tint_light=0.12, marker_tint_dark=0.18,
 }
@@ -350,7 +336,7 @@ do
     end
   end
   for _,key in ipairs({'note_text_min_size','note_text_max_size','note_text_default_size',
-      'button_min_height','slider_row_height','slider_knob_radius',
+      'button_min_height','font_slider_min_width','group_add_note_size',
       'note_edit_min_height','note_edit_max_height','overlay_scroll_width',
       'overlay_scroll_min_thumb_height','editor_caret_period'}) do
     UI_METRICS[key]=math.max(1,UI_METRICS[key])
@@ -361,22 +347,21 @@ do
     math.min(UI_METRICS.note_text_max_size,math.floor(UI_METRICS.note_text_default_size)))
   UI_METRICS.note_edit_max_height=math.max(UI_METRICS.note_edit_min_height,UI_METRICS.note_edit_max_height)
   UI_METRICS.confirm_max_width=math.max(UI_METRICS.confirm_min_width,UI_METRICS.confirm_max_width)
-  UI_METRICS.slider_circle_segments=math.max(3,math.floor(UI_METRICS.slider_circle_segments))
   UI_METRICS.dropdown_visible_rows=math.max(1,math.floor(UI_METRICS.dropdown_visible_rows))
   UI_METRICS.editor_tab_spaces=math.max(1,math.floor(UI_METRICS.editor_tab_spaces))
   UI_METRICS.marker_menu_label_spaces=math.floor(UI_METRICS.marker_menu_label_spaces)
   UI_METRICS.history_shortcut_min_spaces=math.floor(UI_METRICS.history_shortcut_min_spaces)
   UI_METRICS.drag_preview_max_chars=math.max(1,math.floor(UI_METRICS.drag_preview_max_chars))
   UI_METRICS.completed_note_alpha=math.min(1,UI_METRICS.completed_note_alpha)
+  UI_METRICS.startup_layout_warmup_alpha=math.min(1,UI_METRICS.startup_layout_warmup_alpha)
+  UI_METRICS.startup_layout_warmup_frames=math.floor(UI_METRICS.startup_layout_warmup_frames)
   UI_METRICS.tab_heading_hover_alpha=math.min(1,UI_METRICS.tab_heading_hover_alpha)
   UI_METRICS.group_header_tint_light=math.min(1,UI_METRICS.group_header_tint_light)
   UI_METRICS.group_header_tint_dark=math.min(1,UI_METRICS.group_header_tint_dark)
+  UI_METRICS.group_add_note_idle_alpha=math.min(1,UI_METRICS.group_add_note_idle_alpha)
+  UI_METRICS.group_add_note_hover_alpha=math.min(1,UI_METRICS.group_add_note_hover_alpha)
   UI_METRICS.tabs_strip_height=math.max(UI_METRICS.button_min_height,UI_METRICS.tabs_strip_height)
   UI_METRICS.editor_caret_visible_time=math.min(UI_METRICS.editor_caret_period,UI_METRICS.editor_caret_visible_time)
-  UI_METRICS.slider_row_height=math.max(UI_METRICS.slider_row_height,
-    2*(UI_METRICS.slider_knob_radius+UI_METRICS.slider_outline))
-  UI_METRICS.column_heading_height_extra=math.max(UI_METRICS.column_heading_height_extra,
-    2*UI_METRICS.column_heading_pad_y)
   for _,dimensions in pairs(UI_METRICS.popup_sizes) do
     for i=1,2 do
       assert(type(dimensions[i])=='number' and dimensions[i]==dimensions[i]
@@ -429,6 +414,16 @@ local function unesc(s)
 end
 function M.text(value) return {id=uid(), kind='text', text=value or ''} end
 function M.note(value,checked) return {id=uid(),kind='note',text=value or '',checked=checked==true} end
+-- Preserve block identity, text, timecode metadata and color when toggling
+-- a note's checkbox; storage already supports both @text and @note kinds.
+function M.set_note_checkbox(block,enabled)
+  if enabled and block.kind=='text' then
+    block.kind='note';block.checked=false;return true
+  elseif not enabled and block.kind=='note' then
+    block.kind='text';block.checked=nil;return true
+  end
+  return false
+end
 function M.completed(b) return (b.kind=='check' or b.kind=='note') and b.checked==true end
 function M.visible(b,hide) return not (hide and M.completed(b)) end
 function M.display_order(column,hide,completed_last)
@@ -894,6 +889,13 @@ function M.move(list, index, delta)
   local to = index + delta
   if to < 1 or to > #list then return index end
   list[index], list[to] = list[to], list[index]
+  return to
+end
+-- Unlike swapping, a nonadjacent move preserves the relative order of every
+-- other note. This matters when Completed notes last changes display order.
+function M.move_to(list,index,to)
+  if index < 1 or index > #list or to < 1 or to > #list or index==to then return index end
+  table.insert(list,to,table.remove(list,index))
   return to
 end
 -- "before" is a stable destination identity; nil means the end of the list.
@@ -1542,7 +1544,7 @@ local TITLE, PREF = 'ReaNotepad', 'Patch34_Project_Notes'
 -- Compatibility identifiers: existing notes, preferences and window settings.
 local CONTEXT_NAME = 'Patch34 Project Notes'
 local startup_layout_frames=0
-local STARTUP_LAYOUT_FRAMES=2
+local STARTUP_LAYOUT_FRAMES=UI_METRICS.startup_layout_warmup_frames
 local ctx, font, ui_font, heading_bold_font, input_callback
 local sessions, session, modal, open_modal = {}, nil, nil, nil
 local session_sweep={cursor=nil}
@@ -1550,7 +1552,7 @@ local SESSION_CHECKS_PER_FRAME=8
 local REPOSITORY_URL='https://github.com/patch-34/reanotepad'
 local epoch, changed, undo_boundary, force_tab = 0, false, false, nil
 local edit_key, edit_action, history_request
-local tab_rename, escape_pressed = nil, false
+local escape_pressed = false
 local bulk_selection
 local UI
 local frame_checkpoint, crashed, recovery_sequence = nil, false, 0
@@ -1593,6 +1595,7 @@ local RU = {
   ["Paste text or a numbered list on the left. The notes to be added appear on the right."]="Вставь текст или нумерованный список слева. Справа появятся заметки, которые будут добавлены.",
   ["Separate paragraphs with a blank line. In a numbered list, start each new item on a new line."]="Разделяй абзацы пустой строкой. В нумерованном списке начинай каждый новый пункт с новой строки.",
   ["Source text"]="Исходный текст",
+  ["Destination tab"]="Вкладка для импорта",
   ["Paste text to see the resulting notes."]="Вставь текст, чтобы увидеть будущие заметки.",
   ["Undo"]="Отменить",
   ["Redo"]="Повторить",
@@ -1601,12 +1604,15 @@ local RU = {
   ["Move left"]="Сдвинуть влево",
   ["Move right"]="Сдвинуть вправо",
   ["Delete tab..."]="Удалить вкладку…",
-  ["Tabs"]="Вкладки", ["New group"]="Новая группа",
+  ["Column"]="Колонка", ["Tabs"]="Вкладки", ["New group"]="Новая группа",
   ["Groups"]="Группы", ["Group"]="Группа", ["New group below"]="Новая группа ниже",
   ["Rename group"]="Переименовать группу", ["Delete group..."]="Удалить группу…",
   ["Delete group?"]="Удалить группу?", ["Delete this group and its contents?"]="Удалить эту группу вместе с содержимым?",
   ["Move to group"]="В другую группу", ["Group header color"]="Цвет заголовка группы",
   ["No color"]="Без цвета",
+  ["Add checkbox"]="Добавить чекбокс",
+  ["Remove checkbox"]="Убрать чекбокс",
+  ["Add checkbox note"]="Добавить заметку с чекбоксом",
   ["Note with checkbox"]="Заметка с чекбоксом",
   ["Import text..."]="Импорт текста…",
   ["Text"]="Текст",
@@ -1614,9 +1620,14 @@ local RU = {
   ["Dropdown"]="Выпадающий список",
   ["Move up"]="Выше",
   ["Move down"]="Ниже",
+  ["Move to column"]="В другую колонку",
   ["Edit field..."]="Изменить поле…",
   ["Delete..."]="Удалить…",
   ["Edit..."]="Изменить…",
+  ["Rename column..."]="Переименовать колонку…",
+  ["Move column left"]="Колонку влево",
+  ["Move column right"]="Колонку вправо",
+  ["Delete column..."]="Удалить колонку…",
   ["Hide completed"]="Скрыть выполненные",
   ["Completed notes last"]="Выполненные в конце",
   ["Color marker style"]="Оформление цветовых меток",
@@ -1626,7 +1637,7 @@ local RU = {
   ["Left strip"]="Полоска слева",
   ["Whole note"]="Фон всей заметки",
   ["Font"]="Шрифт",
-  [" px"]=" пкс",
+  [" px"]=" px",
   ["Dock to docker"]="Закрепить в докере",
   ["Project"]="Проект",
   ["Track"]="Дорожка",
@@ -1643,31 +1654,44 @@ local RU = {
   ["Split at timecodes"]="Разделять по таймкодам",
   ["No notes yet"]="Заметок пока нет",
   ["Drag to move note"]="Перетащи, чтобы переместить заметку",
+  ["Expand column"]="Развернуть колонку",
+  ["Minimize column"]="Свернуть колонку",
+  ["Columns"]="Колонки",
+  ["New column"]="Новая колонка",
   ["Notes"]="Заметки",
+  ["New tab below"]="Добавить вкладку ниже",
   ["Delete note by dropping here"]="Перетащи сюда заметку, чтобы удалить",
   ["Drop to delete"]="Удалить",
   ["Rename tab"]="Переименовать вкладку",
   ["Move to tab"]="Переместить во вкладку",
+  ["Drag or click an icon, then choose a tab."]="Перетащи значок или нажми его и выбери вкладку.",
+  ["Choose a tab. Esc cancels."]="Выбери вкладку. Esc — отмена.",
   ["Choose a group. Esc cancels."]="Выбери группу. Esc — отмена.",
+  ["Drag or click an icon, then choose a group."]="Перетащи значок или нажми его и выбери группу.",
+  ["Click a highlighted tab heading to add here."]="Нажми на подсвеченный заголовок вкладки, чтобы добавить сюда.",
   ["Click or drop into this tab to add here."]="Нажми или перетащи элемент в эту вкладку, чтобы добавить его.",
   ["Discard note changes?"]="Отменить изменения заметки?",
   ["The note has unsaved changes. Discard them?"]="В заметке есть несохранённые изменения. Отменить их?",
   ["Discard changes"]="Отменить изменения",
   ["Continue editing"]="Продолжить правку",
-  ["Double-click to go to timecode"]="Двойной щелчок — перейти к таймкоду",
+  ["Click to go to timecode"]="Нажми, чтобы перейти к таймкоду",
   ["Timeline position"]="Позиция на таймлайне",
-  ["Timecodes: MM:SS, HH:MM:SS or HH:MM:SS:FF (project FPS); optional milliseconds without frames. Double-click the clock/time indicator to jump."]="Таймкоды: ММ:СС, ЧЧ:ММ:СС или ЧЧ:ММ:СС:КК (кадры по FPS проекта); миллисекунды — без кадров. Двойной щелчок по значку часов или времени — переход.",
+  ["Timecodes: MM:SS, HH:MM:SS or HH:MM:SS:FF (project FPS); optional milliseconds without frames. Click the clock/time indicator to jump and focus arrange."]="Таймкоды: ММ:СС, ЧЧ:ММ:СС или ЧЧ:ММ:СС:КК (кадры по FPS проекта); миллисекунды — без кадров. Нажми на значок часов или время для перехода и возврата фокуса на таймлайн.",
   ["Preview: %d notes"]="Предпросмотр: заметок — %d",
   ["Field name"]="Название поля",
   ["Options (select a circle to set the current value)"]="Варианты (отметь кружком текущее значение)",
   ["Edit dropdown"]="Редактирование списка",
+  ["Rename column"]="Название колонки",
   ["Delete item?"]="Удалить элемент?",
   ["Delete note?"]="Удалить заметку?",
   ["Delete this note and its contents?"]="Удалить эту заметку?",
   ["Delete tab?"]="Удалить вкладку?",
+  ["Delete column?"]="Удалить колонку?",
   ["Delete this tab and its contents?"]="Удалить эту вкладку вместе с содержимым?",
+  ["Delete this column and its contents?"]="Удалить эту колонку вместе с содержимым?",
   ["Import text"]="Импорт текста",
   ["Delete this item and its contents?"]="Удалить этот элемент вместе с содержимым?",
+  ["Empty column"]="Пустая колонка",
   ["Completed items hidden"]="Выполненные пункты скрыты",
   ["(Empty text block)"]="(Пустой текстовый блок)",
   ["Switching note owner..."]="Переключение заметок…",
@@ -1817,7 +1841,7 @@ local function load_notes(s,raw)
   s.history=M.history_new(); s.pending=nil;s.input_state=nil;s.suspended=nil;s.column_views=nil
   s.recovery=nil;s.write_attempt=nil;s.write_stage=nil
   s.history_readonly=nil;s.restore_pending=nil
-  epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; tab_rename=nil
+  epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil
 end
 local function flush_undo(s)
   if s and s.undo_due then
@@ -1869,7 +1893,7 @@ local function sync_project()
   -- The selected/previous owner never waits for the background sweep.
   if session and not api.valid(session.target) then
     discard_removed_session(session);sessions[session.target.key]=nil;session=nil
-    epoch=epoch+1; bulk_selection=nil;modal=nil;open_modal=nil;tab_rename=nil;force_tab=nil
+    epoch=epoch+1; bulk_selection=nil;modal=nil;open_modal=nil;force_tab=nil
   end
   local chosen=target and sessions[target.key]
   if chosen and chosen~=session and not api.valid(chosen.target) then
@@ -1879,7 +1903,7 @@ local function sync_project()
   if not target then
     if session then
       flush_undo(session);M.suspend_session(session);session=nil
-      epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; tab_rename=nil; force_tab=nil
+      epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; force_tab=nil
     end
     return true
   end
@@ -1895,7 +1919,7 @@ local function sync_project()
       load_notes(session,api.read(target))
     end
     session.history.key=nil;session.input_state=nil
-    epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; tab_rename=nil; force_tab=nil
+    epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; force_tab=nil
   end
   local native=api.read(session.target)
   -- An unresolved external conflict must remain read-only until the user
@@ -1909,7 +1933,7 @@ local function sync_project()
       if UI.note_edit and UI.note_edit.owner==session then UI.end_note_edit(true) end
       -- Preserve the local model and exported draft until explicit reload.
       -- draw_modal closes its stale native popup from the stable root scope.
-      modal=nil;open_modal=nil;tab_rename=nil
+      modal=nil;open_modal=nil
       session.conflict=native
     else
       if UI and UI.note_edit and UI.note_edit.owner==session then UI.end_note_edit(true) end
@@ -1925,7 +1949,6 @@ end
 local function request_modal(m)
   if UI then UI.end_note_edit() end
   if session then session.history.key=nil;session.input_state=nil end
-  tab_rename=nil
   m.focus=true; modal=m; open_modal=m.title
 end
 local function begin_action_popup(id)
@@ -1936,13 +1959,6 @@ local function begin_action_popup(id)
     ImGui.CloseCurrentPopup(ctx); ImGui.EndPopup(ctx); return false
   end
   return true
-end
-local function finish_tab_rename(apply)
-  local edit=tab_rename
-  if apply and edit and edit.value:match('%S') and edit.value~=edit.target.name then
-    edit.target.name=edit.value; touch(nil,'rename_tab'); undo_boundary=true
-  end
-  tab_rename=nil
 end
 local function confirm_delete(action,object)
   object=object or 'item'
@@ -1998,119 +2014,13 @@ local function styles()
   push_var(ImGui.StyleVar_FrameBorderSize,UI_METRICS.frame_border_size)
   return count,var_count
 end
-UI={menu_open=nil,info=nil,open_info=nil,slider_state={},read_cache=setmetatable({},{__mode="k"})}
--- Use the native item tooltip directly after the item. ImGui handles
--- placement and text sizing; its hover timer is configured per context.
-function UI.item_tooltip(text)
-  if type(text)~='string' or text=='' then return end
-  local m=UI_METRICS
-  ImGui.PushFont(ctx,ui_font,m.tooltip_font_size)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,m.tooltip_padding_x,m.tooltip_padding_y)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowRounding,m.tooltip_rounding)
-  ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowBorderSize,m.tooltip_border_size)
-  ImGui.PushStyleColor(ctx,ImGui.Col_PopupBg,UI_PALETTE.tooltip.background)
-  ImGui.PushStyleColor(ctx,ImGui.Col_Text,UI_PALETTE.tooltip.text)
-  ImGui.PushStyleColor(ctx,ImGui.Col_Border,UI_PALETTE.tooltip.border)
-  ImGui.SetItemTooltip(ctx,text)
-  ImGui.PopStyleColor(ctx,3)
-  ImGui.PopStyleVar(ctx,3)
-  ImGui.PopFont(ctx)
-end
+UI={menu_open=nil,info=nil,open_info=nil,read_cache=setmetatable({},{__mode="k"})}
 function UI.recovery_pending(owner,changed_only)
   local pending
-  if owner==session and (tab_rename or modal) then pending=tab_rename or modal
+  if owner==session and modal then pending=modal
   elseif UI.note_edit and UI.note_edit.owner==owner then pending=UI.note_edit end
   if pending and (not changed_only or M.pending_changed(pending)) then return pending end
 end
-function UI.clamp(v,lo,hi) return math.floor(math.max(lo,math.min(hi,v))+0.5) end
-function UI.slider(id, value, min_value, max_value, width, reset_value)
-  local sx, sy = ImGui.GetCursorScreenPos(ctx)
-  local dl = ImGui.GetWindowDrawList(ctx)
-
-  -- The hit/layout rectangle includes the knob and its outline at both ends.
-  local inset=UI_METRICS.slider_knob_radius+UI_METRICS.slider_outline
-  width=math.max(2*inset+1,width)
-  local track_width=math.max(1,width-2*inset)
-  local track_x1 = sx + inset
-  local track_x2 = track_x1 + track_width
-  local track_y = sy + UI_METRICS.slider_row_height * 0.5
-
-  ImGui.InvisibleButton(
-    ctx,
-    "##view_slider_" .. id,
-    width,
-    UI_METRICS.slider_row_height,
-    ImGui.ButtonFlags_MouseButtonLeft
-  )
-
-  local changed = false
-  local new_value = value
-  local is_active = ImGui.IsItemActive(ctx)
-  local is_hovered = ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_None)
-
-  local dc_state = UI.slider_state
-  if reset_value~=nil and is_hovered and ImGui.IsMouseDoubleClicked(ctx,0) then
-    dc_state.reset_id=id
-  end
-  if dc_state.reset_id==id then
-    if ImGui.IsMouseReleased(ctx,0) then
-      dc_state.reset_id=nil
-      if is_hovered then new_value=UI.clamp(reset_value,min_value,max_value) end
-    elseif not ImGui.IsMouseDown(ctx,0) then dc_state.reset_id=nil end
-  elseif is_active then
-    local mouse_x=ImGui.GetMousePos(ctx)
-    local t=math.max(0,math.min(1,(mouse_x-track_x1)/track_width))
-    new_value=UI.clamp(min_value+(max_value-min_value)*t,min_value,max_value)
-  end
-  changed=(new_value~=value)
-
-  local t = 0
-  if max_value > min_value then
-    t = (new_value - min_value) / (max_value - min_value)
-  end
-  if t < 0 then t = 0 end
-  if t > 1 then t = 1 end
-
-  local knob_x = track_x1 + track_width * t
-
-  ImGui.DrawList_AddRectFilled(
-    dl,
-    track_x1,
-    track_y - UI_METRICS.slider_track_height * 0.5,
-    track_x2,
-    track_y + UI_METRICS.slider_track_height * 0.5,
-    (ImGui.GetColorEx(ctx,themes[theme].viewer.C_VIEW_SLIDER_TRACK))
-  )
-  ImGui.DrawList_AddRectFilled(
-    dl,
-    track_x1,
-    track_y - UI_METRICS.slider_track_height * 0.5,
-    knob_x,
-    track_y + UI_METRICS.slider_track_height * 0.5,
-    (ImGui.GetColorEx(ctx,themes[theme].viewer.C_VIEW_SLIDER_FILL))
-  )
-
-  ImGui.DrawList_AddCircleFilled(
-    dl,
-    knob_x,
-    track_y,
-    UI_METRICS.slider_knob_radius,
-    ImGui.GetColorEx(ctx,themes[theme].viewer.C_VIEW_SLIDER_KNOB_FILL),
-    UI_METRICS.slider_circle_segments
-  )
-  ImGui.DrawList_AddCircle(
-    dl,
-    knob_x,
-    track_y,
-    UI_METRICS.slider_knob_radius,
-    ImGui.GetColorEx(ctx,themes[theme].viewer.C_VIEW_SLIDER_KNOB_OUTLINE),
-    UI_METRICS.slider_circle_segments,
-    is_hovered and UI_METRICS.slider_outline or UI_METRICS.slider_outline_normal
-  )
-
-  return changed, new_value
-end
-
 function UI.source_button(id, label, width, height, selected)
   width,height=math.max(1,width),math.max(1,height)
   local sx, sy = ImGui.GetCursorScreenPos(ctx)
@@ -2210,7 +2120,7 @@ function UI.quick_access_next(row,width)
 end
 --[[
 Lucide icons: https://github.com/lucide-icons/lucide
-Original paths: type, square-check, list-chevrons-down-up, file-input, palette, trash, x, pencil, check, clock, grip-vertical.
+Original paths: type, square-check, list-chevrons-down-up, file-input, palette, trash, x, pencil, check, clock, grip-vertical, circle-plus.
 Rendered with a 1.5 px stroke at 24 px; white alpha masks are tinted by the UI.
 ISC License
 
@@ -2258,6 +2168,98 @@ SOFTWARE.
 
 ]]
 UI.quick_icon_png={
+  ['circle_plus']=
+    '\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\082\000\000\000\096\000\000\000\096'..
+    '\008\006\000\000\000\226\152\119\056\000\000\000\006\098\075\071\068\000\255\000\255\000\255\160'..
+    '\189\167\147\000\000\008\053\073\068\065\084\120\156\237\157\093\172\093\069\025\134\223\049\241'..
+    '\028\108\139\253\017\193\043\172\088\090\176\049\072\211\090\162\006\123\218\162\024\069\008\033'..
+    '\196\011\245\074\172\198\064\168\033\233\133\222\042\137\063\020\068\068\226\029\023\068\188\128'..
+    '\004\244\078\139\023\208\148\150\196\024\210\002\165\085\060\032\109\061\253\057\080\176\231\180'..
+    '\061\231\241\098\086\061\063\157\111\246\094\123\207\094\179\246\062\235\073\118\118\050\123\175'..
+    '\153\119\190\089\107\230\091\107\102\190\037\053\052\052\052\052\052\052\100\193\229\022\096\001'..
+    '\056\073\171\036\125\074\210\026\073\171\139\207\050\073\139\037\045\047\190\037\233\125\073\167'..
+    '\138\239\113\073\007\037\189\086\124\094\113\206\189\094\169\248\018\212\170\001\128\085\146\182'..
+    '\072\026\041\062\151\039\202\250\152\164\231\138\207\095\156\115\135\019\229\219\255\000\043\128'..
+    '\239\002\207\083\029\251\129\029\192\199\114\215\063\027\192\102\224\143\192\185\010\013\063\159'..
+    '\115\133\134\145\220\246\168\012\096\043\176\059\163\209\045\094\000\110\193\143\061\131\007\176'..
+    '\017\120\041\175\141\219\098\047\176\161\042\187\244\188\181\129\021\146\238\151\244\029\073\031'..
+    '\040\121\248\164\164\125\146\014\200\123\054\175\074\026\213\092\175\071\154\235\021\093\041\233'..
+    '\026\121\143\105\173\164\013\146\134\074\150\059\045\233\049\073\063\114\206\157\042\121\108\125'..
+    '\000\110\007\198\074\158\129\251\129\159\226\187\170\069\009\052\044\002\110\002\238\007\014\148'..
+    '\212\114\012\184\053\133\045\042\005\024\006\126\085\162\162\099\192\067\192\250\010\180\109\040'..
+    '\180\029\111\083\219\052\176\019\040\123\021\229\001\184\138\246\251\250\081\224\110\224\067\025'..
+    '\116\046\002\238\001\222\108\083\235\094\096\101\213\058\075\001\172\195\095\182\173\056\006\220'..
+    '\085\135\179\010\024\002\182\001\255\105\067\247\017\224\250\220\154\131\000\155\128\119\090\084'..
+    '\096\010\120\028\184\044\183\222\249\000\203\240\221\224\249\022\117\056\013\124\041\183\222\057'..
+    '\000\183\001\019\045\132\191\014\124\054\183\214\086\000\055\000\135\091\212\101\130\186\012\206'..
+    '\192\072\027\198\127\010\088\150\091\107\187\000\031\006\126\223\162\078\147\192\077\185\133\174'..
+    '\035\222\237\156\007\238\201\042\178\011\128\237\248\110\211\226\029\114\141\009\120\111\039\054'..
+    '\224\078\000\119\100\017\151\016\224\078\226\087\248\017\170\246\142\240\126\126\204\213\124\023'..
+    '\216\092\169\168\030\002\108\041\234\100\177\151\042\061\058\224\225\136\152\073\234\230\037\036'..
+    '\128\214\099\221\206\170\132\220\030\017\113\158\001\232\118\044\240\221\145\053\038\076\003\183'..
+    '\245\090\192\010\226\055\044\125\059\224\182\011\112\111\164\254\199\128\229\189\044\252\177\072'..
+    '\225\127\232\089\193\053\003\120\034\098\135\223\244\170\208\013\216\151\223\033\096\105\079\010'..
+    '\174\033\192\082\236\155\181\041\096\099\234\002\029\176\047\082\096\237\239\112\083\131\191\099'..
+    '\182\078\200\061\169\011\251\090\228\146\123\036\105\097\125\004\241\046\249\230\148\005\089\043'..
+    '\022\122\059\232\216\122\134\128\007\128\147\197\231\001\050\060\089\037\238\148\236\078\085\200'..
+    '\230\072\043\223\149\164\144\242\154\118\006\180\084\227\135\095\172\229\123\017\251\108\074\081'..
+    '\192\159\140\204\071\115\156\117\133\166\019\001\061\039\050\105\025\006\222\050\108\244\108\183'..
+    '\153\095\129\189\110\231\238\068\117\232\068\087\144\140\122\172\123\131\115\192\021\221\100\252'..
+    '\067\035\227\049\050\076\035\206\210\085\183\006\088\132\061\199\028\189\057\109\181\076\228\219'..
+    '\070\250\019\206\185\051\157\201\029\060\156\115\255\149\244\164\241\243\183\058\202\020\184\218'..
+    '\058\211\168\096\245\066\011\109\181\186\002\010\077\027\035\246\250\132\117\092\236\010\176\030'..
+    '\039\191\226\156\123\169\059\185\131\135\115\238\069\249\133\099\033\204\071\243\177\006\176\022'..
+    '\172\062\221\174\168\005\136\229\245\152\139\127\131\013\128\095\160\186\201\056\230\185\114\154'..
+    '\022\020\187\140\244\173\148\089\244\011\172\054\250\178\009\018\044\023\236\150\058\142\001\133'..
+    '\174\197\248\009\169\016\171\066\199\088\093\208\053\070\250\190\098\196\111\008\224\156\123\095'..
+    '\146\053\062\094\027\074\044\219\000\251\203\138\090\128\028\048\210\087\135\018\173\006\088\099'..
+    '\164\031\044\045\103\225\097\217\040\104\083\171\001\130\253\149\252\174\195\134\056\150\043\122'..
+    '\117\040\209\106\128\021\070\250\104\105\057\011\015\203\070\065\155\090\013\112\169\145\254\110'..
+    '\105\057\001\152\251\060\191\052\145\124\059\033\245\124\130\101\035\203\166\023\067\248\113\047'..
+    '\248\237\070\093\067\248\121\126\110\146\204\039\000\151\025\249\143\133\254\031\188\057\000\038'..
+    '\021\222\087\053\236\156\059\155\064\228\009\217\221\092\046\078\058\231\062\210\109\038\192\176'..
+    '\164\137\192\079\147\206\185\075\230\039\150\221\052\215\144\024\171\001\222\051\210\151\036\042'..
+    '\247\241\068\249\164\036\149\038\171\175\063\029\074\180\026\032\248\231\072\230\101\217\033\105'..
+    '\167\252\086\211\220\156\146\215\178\035\081\126\165\026\032\008\240\178\049\144\124\058\141\198'..
+    '\238\176\070\209\220\186\036\009\184\206\144\247\247\208\255\173\043\224\164\145\254\241\052\050'..
+    '\007\026\203\070\065\155\090\013\096\197\215\009\062\207\104\152\131\245\024\039\104\083\171\001'..
+    '\172\071\014\086\230\013\051\088\054\010\218\180\108\003\172\045\045\103\225\097\217\168\253\231'..
+    '\104\216\019\242\147\052\019\050\049\093\075\128\179\134\188\082\019\050\135\036\029\013\164\015'..
+    '\073\250\124\042\193\003\200\141\146\062\024\072\063\034\041\024\038\045\216\000\206\057\036\253'..
+    '\213\040\100\225\068\151\042\143\101\155\093\133\077\047\034\246\040\194\154\124\239\237\062\168'..
+    '\254\230\022\035\221\154\172\183\001\062\105\245\181\084\024\081\202\208\086\187\049\000\191\097'..
+    '\195\098\165\117\156\121\005\020\161\029\255\102\252\252\205\046\245\014\034\214\050\206\125\206'..
+    '\185\055\058\202\017\123\213\239\024\025\189\161\186\093\001\248\229\040\214\028\074\231\171\200'..
+    '\129\203\177\221\170\108\091\082\107\216\000\214\042\242\238\150\167\023\153\063\107\100\254\038'..
+    '\205\006\013\001\151\000\255\054\108\244\076\138\002\070\172\051\014\216\150\160\014\157\104\170'..
+    '\211\022\165\031\068\236\115\099\170\066\172\077\122\199\201\016\253\138\122\109\210\179\162\066'..
+    '\166\217\164\087\020\244\213\072\043\063\154\172\160\062\003\248\093\196\046\095\078\089\144\195'..
+    '\135\100\009\049\005\220\144\172\176\062\001\248\028\246\070\237\116\103\255\172\002\215\099\007'..
+    '\180\251\023\137\150\172\244\003\248\000\127\255\136\156\144\189\137\028\000\060\026\185\228\158'..
+    '\097\080\003\095\207\162\232\013\158\138\216\225\225\094\022\190\156\120\152\178\237\061\043\188'..
+    '\038\000\247\069\234\127\148\094\007\039\004\110\197\007\039\010\049\005\220\217\083\001\025\001'..
+    '\190\065\060\096\147\245\048\046\185\144\007\035\103\193\036\041\061\128\154\064\235\144\101\191'..
+    '\168\082\204\016\182\087\004\062\192\221\150\202\004\245\024\124\036\247\211\145\250\238\001\066'..
+    '\019\049\061\021\181\018\031\178\209\098\130\001\232\142\240\221\142\181\239\011\224\109\032\207'..
+    '\114\029\224\051\196\003\183\078\001\247\102\017\215\037\120\111\231\062\226\129\091\199\129\235'..
+    '\114\011\221\004\156\137\136\004\120\154\012\113\133\058\005\031\186\248\201\022\117\154\004\182'..
+    '\230\214\042\233\255\158\081\171\248\209\135\233\131\059\102\252\029\238\063\091\212\229\012\240'..
+    '\245\220\090\231\128\191\018\198\091\008\159\198\135\175\255\104\110\189\243\193\223\227\060\068'..
+    '\188\203\001\063\024\231\013\218\109\001\092\079\124\096\190\192\024\240\125\252\102\134\220\154'..
+    '\135\241\143\148\219\121\165\201\219\228\238\243\091\129\247\142\098\046\234\108\222\194\079\123'..
+    '\086\062\189\137\159\070\220\142\061\153\050\159\061\192\149\085\235\236\008\252\125\194\131\216'..
+    '\119\204\243\057\014\252\154\010\198\008\252\234\133\071\176\231\112\231\051\013\252\146\170\253'..
+    '\252\020\224\223\172\209\206\059\101\102\243\026\240\051\224\102\096\113\235\082\090\106\088\002'..
+    '\124\005\248\057\112\176\164\150\163\244\120\176\173\226\069\110\203\037\253\068\210\054\149\223'..
+    '\147\118\078\062\246\194\126\205\188\158\118\084\126\183\201\184\102\182\082\045\145\127\205\237'..
+    '\165\242\235\243\047\188\254\118\173\164\245\010\047\023\140\049\037\233\183\146\126\236\156\027'..
+    '\047\121\108\061\193\207\039\188\088\242\012\204\193\110\096\093\110\123\245\012\224\011\192\159'..
+    '\051\027\057\196\243\012\242\203\060\231\003\124\017\063\137\099\173\059\170\130\179\133\134\052'..
+    '\171\023\250\017\242\190\208\185\187\069\083\009\168\213\229\006\092\037\031\224\110\164\248\078'..
+    '\245\198\235\035\242\043\148\119\201\047\021\127\035\081\190\093\083\171\006\152\015\126\087\201'..
+    '\181\154\241\106\214\072\090\042\239\237\044\211\204\198\241\247\228\189\162\011\222\209\065\205'..
+    '\188\254\246\085\231\220\161\106\149\055\052\052\052\052\052\052\212\158\255\001\026\109\110\186'..
+    '\253\239\204\074\000\000\000\000\073\069\078\068\174\066\096\130',
   grip=
     '\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\082\000\000\000\096\000\000\000\096\008\006\000\000\000\226\152\119\056\000\000\000\009\112\072\089\115\000\000\059\014\000\000\059'..
     '\014\001\204\182\161\131\000\000\000\025\116\069\088\116\083\111\102\116\119\097\114\101\000\119\119\119\046\105\110\107\115\099\097\112\101\046\111\114\103\155\238\060\026\000\000\002\092\073'..
@@ -2554,11 +2556,11 @@ function UI.timecode_badge(block)
   end
   ImGui.EndGroup(ctx)
   local hovered=ImGui.IsItemHovered(ctx)
-  UI.item_tooltip(tr('Timeline position')..': '..caption..'\n'..tr('Double-click to go to timecode'))
+  ImGui.SetItemTooltip(ctx,tr('Timeline position')..': '..caption..'\n'..tr('Click to go to timecode'))
   ImGui.PopFont(ctx)
   return hovered,true
 end
-function UI.quick_access_button(id,caption,kind,side,selected)
+function UI.quick_access_button(id,caption,kind,side,selected,instruction)
   local sx,sy=ImGui.GetCursorScreenPos(ctx)
   local clicked=UI.source_button('quick_'..id,'',side,side,selected)
   local image=UI.icon_image(kind)
@@ -2568,14 +2570,17 @@ function UI.quick_access_button(id,caption,kind,side,selected)
   ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),image,
     sx+offset,sy+offset,sx+offset+icon_side,sy+offset+icon_side,
     0,0,1,1,color)
-  UI.item_tooltip(tr(caption))
+  local hint=tr(caption)
+  local detail=instruction and tr(instruction)
+  if detail and detail~=hint then hint=hint..'\n'..detail end
+  ImGui.SetItemTooltip(ctx,hint)
   return clicked
 end
 -- Editing belongs to one existing block in one owner/document generation.
 function UI.note_edit_valid(edit)
   if not (edit and edit.owner==session and edit.epoch==epoch and session
       and edit.doc==session.doc and not session.error and not session.conflict
-      and not modal and not tab_rename and not UI.info and not bulk_selection
+      and not modal and not UI.info and not bulk_selection
       and not UI.note_drag and not UI.place and M.visible(edit.block,hide_completed)
       and startup_layout_frames>=STARTUP_LAYOUT_FRAMES) then return false end
   local tab,column=M.note_location(session.doc,edit.block)
@@ -2655,13 +2660,13 @@ function UI.note_edit_update()
   local press=UI.note_press
   if press then
     local x,y=ImGui.GetMousePos(ctx)
-    if (x-press.x)^2+(y-press.y)^2>36 then press.dragged=true end
+    if (x-press.x)^2+(y-press.y)^2>UI_METRICS.pointer_drag_threshold^2 then press.dragged=true end
     if press.owner~=session or press.epoch~=epoch or UI.note_drag
         or (not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0)) then UI.note_press=nil end
   end
 end
 function UI.note_text_click(tab,column,block,hovered)
-  if modal or tab_rename or UI.info or UI.note_drag or bulk_selection
+  if modal or UI.info or UI.note_drag or bulk_selection
       or startup_layout_frames<STARTUP_LAYOUT_FRAMES then return end
   if hovered and ImGui.IsMouseClicked(ctx,0) then
     local x,y=ImGui.GetMousePos(ctx)
@@ -2708,7 +2713,7 @@ function UI.wrapped_editor(m,height,id,save_on_enter)
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,pad_x+UI_METRICS.editor_extra_pad_x,pad_y+UI_METRICS.editor_extra_pad_y)
   local visible=ImGui.BeginChild(ctx,id or 'import_source_wrapped',0,height,ImGui.ChildFlags_Borders)
   ImGui.PopStyleVar(ctx);ImGui.PopStyleColor(ctx)
-  if not visible then return false,m.value end
+  if not visible then ImGui.EndChild(ctx); return false,m.value end
   local origin_x,origin_y=ImGui.GetCursorScreenPos(ctx)
   local window_x,window_y=ImGui.GetWindowPos(ctx)
   local window_w,window_h=ImGui.GetWindowSize(ctx)
@@ -2957,12 +2962,33 @@ function UI.double_click_released(key,hovered)
 end
 function UI.seek_note(b,hovered)
   if bulk_selection or UI.note_drag or startup_layout_frames<STARTUP_LAYOUT_FRAMES then return end
-  local fps,drop_frame=project_timecode_settings()
-  if UI.double_click_released('timecode_'..b.id,hovered and M.block_time(b,fps,drop_frame)~=nil)
-      and session and session.target and api.valid(session.target) then
+  -- Use an explicit press/release gesture; a click on the badge must not
+  -- start text editing or unexpectedly seek while dragging the mouse.
+  if hovered and ImGui.IsMouseClicked(ctx,0) then
+    local mx,my=ImGui.GetMousePos(ctx)
+    UI.timecode_press={block=b,owner=session,epoch=epoch,x=mx,y=my}
+  end
+  local press=UI.timecode_press
+  if not press or press.block~=b then return end
+  if ImGui.IsMouseReleased(ctx,0) then
+    UI.timecode_press=nil
+    local mx,my=ImGui.GetMousePos(ctx)
+    local dragged=(mx-press.x)^2+(my-press.y)^2>UI_METRICS.pointer_drag_threshold^2
+    if not hovered or dragged or press.block~=b or press.owner~=session or press.epoch~=epoch
+        or not session or not session.target or not api.valid(session.target) then return end
+    local fps,drop_frame=project_timecode_settings()
     local offset=reaper.GetProjectTimeOffset(session.proj,false)
     local position=M.seek_position(b,offset,fps,drop_frame)
-    if position~=nil then reaper.SetEditCurPos2(session.proj,position,true,false) end
+    if position~=nil then
+      -- Commit an active note draft before giving keyboard focus to REAPER.
+      if UI.note_edit then UI.end_note_edit() end
+      reaper.SetEditCurPos2(session.proj,position,true,false)
+      -- The edit cursor position alone doesn't transfer keyboard focus from
+      -- an undocked ImGui window. This is the native REAPER arrange focus API.
+      reaper.SetCursorContext(1,nil)
+    end
+  elseif not ImGui.IsMouseDown(ctx,0) then
+    UI.timecode_press=nil
   end
 end
 -- Native modal dimming with outside-click cancellation. Check nested popups
@@ -3263,7 +3289,8 @@ function UI.info_window()
       ImGui.CloseCurrentPopup(ctx);UI.info=nil;ImGui.EndPopup(ctx)
       ImGui.PopStyleVar(ctx,2);ImGui.PopStyleColor(ctx,7);return
     end
-    if UI.popup_body('information_body',tr('Close')) then
+    local body_visible=UI.popup_body('information_body',tr('Close'))
+    if body_visible then
       if kind=='about' then
         ImGui.Text(ctx,TITLE)
         ImGui.TextDisabled(ctx,tr('Version: ')..VERSION)
@@ -3276,8 +3303,8 @@ function UI.info_window()
           UI.open_url('https://github.com/patch-34')
         end
       end
-      ImGui.EndChild(ctx)
     end
+    ImGui.EndChild(ctx)
     -- Same button geometry as other dialogs, with Viewer's About-button skin.
     local close_w,close_h=UI.button_size(tr('Close'))
     local close_x,close_y=ImGui.GetCursorScreenPos(ctx)
@@ -3344,18 +3371,18 @@ local function add_menu(column)
   if ImGui.MenuItem(ctx,ui_label('Text')) then add_from_menu('text',column) end
   if ImGui.MenuItem(ctx,ui_label('Dropdown')) then add_from_menu('select',column) end
 end
-local function add_tab()
+local function add_column()
   if not session or not session.doc or #session.doc.tabs>=8 then return end
   local board=M.tab(tr('Tab')..' '..(#session.doc.tabs+1))
   board.columns[1].name=tr('Group')..' 1'
   session.doc.tabs[#session.doc.tabs+1]=board;session.active=#session.doc.tabs
-  touch(nil,'add_tab');undo_boundary=true
+  touch(nil,'add_column');undo_boundary=true
 end
 -- Placement is owner/generation scoped. Only a completed target click or native
 -- payload delivery queues creation, and every destination is revalidated then.
 function UI.place_valid(p)
   return p and p.owner==session and p.epoch==epoch and session and p.doc==session.doc
-    and not session.error and not session.conflict and not modal and not tab_rename and not UI.info
+    and not session.error and not session.conflict and not modal and not UI.info
     and not history_request and startup_layout_frames>=STARTUP_LAYOUT_FRAMES
 end
 function UI.place_begin(kind,mode)
@@ -3427,7 +3454,7 @@ function UI.drag_trash_target()
     ImGui.DrawList_AddText(dl,sx+label_x,sy+(height-ImGui.GetTextLineHeight(ctx))*0.5,
       ImGui.GetColorEx(ctx,color),tr('Drop to delete'))
   end
-  UI.item_tooltip(tr('Delete note by dropping here'))
+  ImGui.SetItemTooltip(ctx,tr('Delete note by dropping here'))
   if ImGui.BeginDragDropTarget(ctx) then
     local flags=ImGui.DragDropFlags_AcceptBeforeDelivery|ImGui.DragDropFlags_AcceptNoDrawDefaultRect
     local accepted,token=ImGui.AcceptDragDropPayload(ctx,'P34_NOTE',nil,flags)
@@ -3444,7 +3471,7 @@ function UI.creation_toolbar()
   -- for controls in child windows with different padding and layout origins.
   UI.shared_actions_right=nil
   local enabled=session and session.doc and not session.error and not session.conflict
-    and not modal and not UI.info and not tab_rename and not history_request
+    and not modal and not UI.info and not history_request
   local dragging=UI.note_drag_current()~=nil
   local side=UI_METRICS.button_min_height
   local gap=UI_METRICS.item_gap_x
@@ -3456,13 +3483,13 @@ function UI.creation_toolbar()
   if dragging then UI.drag_trash_target() else ImGui.Dummy(ctx,side,side) end
   ImGui.SameLine(ctx,0,gap)
   if not dragging and enabled then
-    if UI.quick_access_button('create_group','New group','pencil',side,false) then
+    if UI.quick_access_button('create_group','New group','pencil',side,false,'New group') then
       local board=active_tab()
       if board then UI.add_section(board,board.columns[#board.columns]) end
     end
   else
     ImGui.BeginDisabled(ctx,true)
-    UI.quick_access_button('create_group','New group','pencil',side,false)
+    UI.quick_access_button('create_group','New group','pencil',side,false,'New group')
     ImGui.EndDisabled(ctx)
   end
   ImGui.BeginDisabled(ctx,not enabled or dragging)
@@ -3471,7 +3498,7 @@ function UI.creation_toolbar()
     ImGui.SameLine(ctx,0,gap)
     local p=UI.place
     local clicked=UI.quick_access_button('create_'..action[1],action[2],action[1],side,
-      p and p.kind==action[1])
+      p and p.kind==action[1],'Drag or click an icon, then choose a group.')
     -- Read the actual rectangle immediately: dragging tooltips/popups may
     -- change the ImGui last-item record later in this loop iteration.
     if action[1]=='import' then
@@ -3560,7 +3587,7 @@ function UI.placement_target(section,sx,sy,width,bottom,role,activated,visual)
     hovered=mx>=sx and mx<sx+width and my>=sy and my<bottom
       and mx>=wx and mx<wx+ww and my>=wy and my<wy+wh
     if visual then UI.note_highlight(visual.x,visual.y,visual.width,visual.bottom) end
-    if hovered then UI.item_tooltip(tr('Click or drop into this tab to add here.')) end
+    if hovered then ImGui.SetItemTooltip(ctx,tr('Click or drop into this tab to add here.')) end
   end
   if p.mode=='click' then
     if (role=='restore' and activated or role~='restore' and hovered and ImGui.IsMouseReleased(ctx,0)) then
@@ -3590,11 +3617,11 @@ end
 
 local function can_history(direction)
   if not session or (not session.doc and not session.history_readonly)
-      or (session.error and not (session.history_readonly and not session.doc)) or session.conflict or modal or tab_rename or UI.info then return false end
+      or (session.error and not (session.history_readonly and not session.doc)) or session.conflict or modal or UI.info then return false end
   return #(direction<0 and session.history.undo or session.history.redo)>0
 end
 local function history_shortcuts()
-  if not session or modal or tab_rename or UI.info or UI.note_edit or (session.error and not (session.history_readonly and not session.doc)) or session.conflict then return end
+  if not session or modal or UI.info or UI.note_edit or (session.error and not (session.history_readonly and not session.doc)) or session.conflict then return end
   if not ImGui.IsWindowFocused(ctx,ImGui.FocusedFlags_RootAndChildWindows) then return end
   -- NoUndoRedo on document inputs prevents both histories firing for one chord.
   -- Mod_Ctrl maps to Cmd under ReaImGui's native macOS behavior.
@@ -3612,10 +3639,13 @@ local HISTORY_ACTIONS = {
   paste={'paste','вставку текста'},cut={'cut','вырезание текста'},replace={'text replacement','замену текста'},
   line_break={'line break','перевод строки'},edit_note={'note edit','изменение заметки'},checkbox={'checkbox change','отметку'},
   choose_option={'option selection','выбор значения'},edit_dropdown={'dropdown edit','изменение списка'},
-  add_note={'add note','добавление заметки'},delete_item={'delete note','удаление заметки'},
+  add_note={'add note','добавление заметки'},add_checkbox={'add checkbox','добавление чекбокса'},
+  remove_checkbox={'remove checkbox','удаление чекбокса'},delete_item={'delete note','удаление заметки'},
   delete_note={'delete note','удаление заметки'},move_note={'move note','перемещение заметки'},
   add_dropdown={'add dropdown','добавление списка'},add_tab={'add tab','добавление вкладки'},
   delete_tab={'delete tab','удаление вкладки'},rename_tab={'rename tab','переименование вкладки'},move_tab={'move tab','перемещение вкладки'},
+  add_column={'add column','добавление колонки'},delete_column={'delete column','удаление колонки'},
+  rename_column={'rename column','переименование колонки'},move_column={'move column','перемещение колонки'},
   import={'import','импорт'},restore={'recovery restore','восстановление'},
 }
 function UI.history_caption(direction)
@@ -3659,7 +3689,7 @@ local function menu_bar()
     ImGui.EndPopup(ctx)
   end
   if UI.begin_menu('Tabs',enabled) then
-    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_tab() end
+    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_column() end
     ImGui.Separator(ctx)
     for index,board in ipairs(session.doc.tabs) do
       if ImGui.BeginMenu(ctx,label(board.name)..'##board_menu_'..board.id) then
@@ -3676,7 +3706,7 @@ local function menu_bar()
       local board=active_tab()
       UI.add_section(board,board.columns[#board.columns])
     end
-    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_tab() end
+    if ImGui.MenuItem(ctx,ui_label('New tab'),nil,false,#session.doc.tabs<8) then add_column() end
     ImGui.EndPopup(ctx)
   end
   if UI.begin_menu('View') then
@@ -3696,7 +3726,7 @@ local function menu_bar()
     end
     if ImGui.BeginMenu(ctx,ui_label('Note spacing')) then
       ImGui.TextDisabled(ctx,tr('Gap above and below the separator'))
-      ImGui.SetNextItemWidth(ctx,180)
+      ImGui.SetNextItemWidth(ctx,UI_METRICS.slider_width)
       local moved,value=ImGui.SliderInt(ctx,'##note_spacing',note_spacing,
         UI_METRICS.note_spacing_min,UI_METRICS.note_spacing_max,'%d px')
       if moved then note_spacing=value;pref('note_spacing',note_spacing) end
@@ -3844,8 +3874,8 @@ local function block_actions(tab,column,index)
   if begin_action_popup('block_actions') then
     local up=M.block_neighbor(column,index,-1,hide_completed,completed_last)
     local down=M.block_neighbor(column,index,1,hide_completed,completed_last)
-    if ImGui.MenuItem(ctx,ui_label('Move up'),nil,false,up~=nil) then session.pending=function() M.move(column.blocks,index,up-index); touch(nil,'move_note') end end
-    if ImGui.MenuItem(ctx,ui_label('Move down'),nil,false,down~=nil) then session.pending=function() M.move(column.blocks,index,down-index); touch(nil,'move_note') end end
+    if ImGui.MenuItem(ctx,ui_label('Move up'),nil,false,up~=nil) then session.pending=function() M.move_to(column.blocks,index,up); touch(nil,'move_note') end end
+    if ImGui.MenuItem(ctx,ui_label('Move down'),nil,false,down~=nil) then session.pending=function() M.move_to(column.blocks,index,down); touch(nil,'move_note') end end
     if ImGui.BeginMenu(ctx,ui_label('Move to group'),#tab.columns>1) then
       for _,target in ipairs(tab.columns) do
         if target~=column and ImGui.MenuItem(ctx,label(target.name)..'##'..target.id) then
@@ -3856,8 +3886,13 @@ local function block_actions(tab,column,index)
       end
       ImGui.EndMenu(ctx)
     end
+    local block=column.blocks[index]
+    if block.kind=='text' and ImGui.MenuItem(ctx,ui_label('Add checkbox')) then
+      if M.set_note_checkbox(block,true) then touch(nil,'add_checkbox');undo_boundary=true end
+    elseif block.kind=='note' and ImGui.MenuItem(ctx,ui_label('Remove checkbox')) then
+      if M.set_note_checkbox(block,false) then touch(nil,'remove_checkbox');undo_boundary=true end
+    end
     if ImGui.BeginMenu(ctx,ui_label('Color marker')) then
-      local block=column.blocks[index]
       marker_menu(block.color,function(key)
         if M.selection_color(column,{[block.id]=true},false,key)>0 then touch(nil,'color_marker');undo_boundary=true end
       end)
@@ -3869,45 +3904,16 @@ local function block_actions(tab,column,index)
   end
   ImGui.PopFont(ctx)
 end
--- The palette lives directly on each note, not hidden behind bulk selection.
--- It appears while hovering a note and occupies the pre-existing actions slot;
--- it does not change note width, scrolling or the right alignment guide.
-UI.note_bounds=setmetatable({},{__mode='k'})
-function UI.block_action_button(block)
-  if UI.note_editing(block) then
-    return UI.button(ctx,ui_label('...##actions'))
-  end
+-- An action hitbox is submitted in the note table with a stable native ID.
+-- Its dots are painted after the complete note geometry is measured, using
+-- the same painter and tokens as the group menu. No previous-frame rect cache.
+function UI.block_action_button()
   local width,height=UI.button_size('...')
-  local rect=UI.note_bounds[block]
-  local mx,my=ImGui.GetMousePos(ctx)
-  local hovering=rect and mx>=rect[1] and mx<=rect[3]
-    and my>=rect[2] and my<=rect[4]
-    and ImGui.IsWindowHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
-  local palette_open=ImGui.IsPopupOpen(ctx,'note_palette')
-  if not bulk_selection and not UI.note_drag_current() and not UI.place
-      and (hovering or palette_open) then
-    local sx,sy=ImGui.GetCursorScreenPos(ctx)
-    local clicked=UI.source_button('note_palette_'..block.id,'',width,height)
-    local icon=UI.icon_image('palette')
-    local side=math.max(1,math.min(UI_METRICS.quick_icon_size,width-4,height-4))
-    local ix,iy=sx+(width-side)*0.5,sy+(height-side)*0.5
-    local tint=ImGui.GetColor(ctx,ImGui.Col_Text)
-    ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),icon,
-      ix,iy,ix+side,iy+side,0,0,1,1,tint)
-    UI.item_tooltip(tr('Color marker'))
-    if clicked then ImGui.OpenPopup(ctx,'note_palette') end
-  else
-    ImGui.Dummy(ctx,width,height)
-  end
-  if begin_action_popup('note_palette') then
-    marker_menu(block.color,function(key)
-      if block.color~=key then
-        block.color=key;touch(nil,'color_marker');undo_boundary=true
-      end
-    end)
-    ImGui.EndPopup(ctx)
-  end
-  return false
+  local x,y=ImGui.GetCursorScreenPos(ctx)
+  local clicked=ImGui.InvisibleButton(ctx,'##note_action_dots',width,height,
+    ImGui.ButtonFlags_MouseButtonLeft|ImGui.ButtonFlags_EnableNav)
+  local focused=ImGui.IsItemFocused(ctx)
+  return {clicked=clicked,focused=focused,x=x,y=y,width=width,height=height}
 end
 -- Shared note shell. All note kinds stay in the calling page_body window;
 -- these non-scrolling tables only allocate cells, never child windows.
@@ -3925,7 +3931,11 @@ function UI.note_layout(block,width)
     math.max(checkbox_h,action_h,edit_h))
   row.has_checkbox=checked
   row.checkbox_width=checkbox_h+m.note_checkbox_text_gap
-  row.action_width=action_w+m.item_gap_x;row.action_height=action_h
+  -- Keep two standard gaps in the action column to separate the editable
+  -- content from the menu hitbox. Both group and note buttons are ultimately
+  -- anchored to the same absolute right edge, not to native table cell padding.
+  row.action_width=action_w+2*m.item_gap_x;row.action_button_width=action_w
+  row.action_height=action_h
   row.wide=width>=row.action_width+m.note_actions_min_content_width
   row.has_accessory=block.kind=='select' and UI.note_editing(block) and row.wide
     and width>=row.action_width+edit_w+2*m.item_gap_x+m.note_actions_min_content_width
@@ -4016,13 +4026,13 @@ local function draw_block(tab,column,b,index,actions_right)
   local x,y=ImGui.GetCursorScreenPos(ctx)
   local width=math.max(1,math.min(ImGui.GetContentRegionAvail(ctx),actions_right-x))
   local row=UI.note_layout(b,width)
-  local actions_clicked,first_line_center=false,nil
+  local action_hit,first_line_center=nil,nil
   -- Every note owns this same padding/spacing contract. No kind inherits
   -- native table CellPadding, and no hidden button determines heading height.
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_CellPadding,0,0)
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_ItemSpacing,UI_METRICS.item_gap_x,0)
   local table_open=row.wide and ImGui.BeginTable(ctx,'block',2,
-    ImGui.TableFlags_SizingStretchSame|ImGui.TableFlags_NoSavedSettings,width)
+    ImGui.TableFlags_SizingStretchProp|ImGui.TableFlags_NoSavedSettings,width)
   if not row.wide or table_open then
     if table_open then
       ImGui.TableSetupColumn(ctx,'Content',ImGui.TableColumnFlags_WidthStretch,1)
@@ -4032,9 +4042,14 @@ local function draw_block(tab,column,b,index,actions_right)
     first_line_center=UI.note_heading(tab,column,b,row)
     if table_open then
       ImGui.TableNextColumn(ctx)
-      local ax,ay=ImGui.GetCursorScreenPos(ctx)
-      ImGui.SetCursorScreenPos(ctx,ax,(first_line_center or (ay+row.center))-row.action_height*0.5)
-      actions_clicked=UI.block_action_button(b)
+      local _,ay=ImGui.GetCursorScreenPos(ctx)
+      local action_y=UI.note_editing(b) and (row.top+row.text_y)
+        or ((first_line_center or (ay+row.center))-row.action_height*0.5)
+      -- Table cells provide width reservation, but their local cursor
+      -- includes native spacing. Use the same absolute trailing-action guide
+      -- as the group header; both controls follow one vertical guide.
+      ImGui.SetCursorScreenPos(ctx,UI.trailing_action_left(row.actions_right,row.action_button_width),action_y)
+      action_hit=UI.block_action_button()
     end
     if b.kind=='select' then
       if table_open then ImGui.TableNextRow(ctx);ImGui.TableNextColumn(ctx) end
@@ -4042,11 +4057,11 @@ local function draw_block(tab,column,b,index,actions_right)
       ImGui.SetCursorScreenPos(ctx,bx,by+UI_METRICS.note_content_gap_y)
       UI.note_value_body(b)
     end
-    if not table_open then actions_clicked=UI.block_action_button(b) end
+    if not table_open then action_hit=UI.block_action_button() end
     if table_open then ImGui.EndTable(ctx) end
   end
   ImGui.PopStyleVar(ctx,2)
-  return actions_clicked,first_line_center,row
+  return action_hit,first_line_center,row
 end
 local function draw_selection_block(column,b,index,actions_right)
   local sx,sy=ImGui.GetCursorScreenPos(ctx)
@@ -4147,9 +4162,9 @@ local function draw_marked_block(tab,column,b,index,actions_right)
   -- Measure content independently of native trailing ItemSpacing. Both sides
   -- of the shell get the same actual padding, which also belongs to its fill.
   ImGui.BeginGroup(ctx)
-  local actions_clicked,first_line_center=false,nil
+  local action_hit,first_line_center=nil,nil
   if selecting then first_line_center=draw_selection_block(column,b,index,actions_right)
-  else actions_clicked,first_line_center=draw_block(tab,column,b,index,actions_right) end
+  else action_hit,first_line_center=draw_block(tab,column,b,index,actions_right) end
   ImGui.EndGroup(ctx)
   local _,content_bottom=ImGui.GetItemRectMax(ctx)
   local pad_x=ImGui.GetCursorScreenPos(ctx)
@@ -4190,10 +4205,23 @@ local function draw_marked_block(tab,column,b,index,actions_right)
   if dragged and dragged.block==b then
     UI.note_highlight(sx,sy,width,bottom)
   end
-  UI.note_bounds[b]={sx,sy,sx+width,bottom}
   if UI.note_editing(b) then UI.note_edit.rect={sx,sy,sx+width,bottom} end
+  -- Paint only after the complete note rectangle is known. This uses the
+  -- current frame even when scrolling or changing the note's line count.
+  if action_hit and not UI.note_drag_current() and not UI.place then
+    local mx,my=ImGui.GetMousePos(ctx)
+    local hovered=ImGui.IsWindowHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
+      and mx>=sx and mx<sx+width and my>=sy and my<bottom
+    if hovered or action_hit.focused or UI.note_editing(b) or ImGui.IsPopupOpen(ctx,'block_actions') then
+      local dot_color=ImGui.GetColor(ctx,ImGui.Col_Text)
+      if completed then dot_color=placement_alpha(dot_color,UI_METRICS.completed_note_alpha) end
+      UI.paint_menu_dots(action_hit.x,action_hit.y,action_hit.width,action_hit.height,dot_color)
+    end
+  end
   -- Open and draw the popup in the block ID scope, after any nested tables.
-  if actions_clicked then ImGui.OpenPopup(ctx,'block_actions') end
+  if action_hit and action_hit.clicked and not UI.note_drag_current() and not UI.place then
+    ImGui.OpenPopup(ctx,'block_actions')
+  end
   -- Test the complete block rectangle without placing an overlay over its
   -- checkbox or dropdown. The window check excludes clipped areas and popups.
   if startup_layout_frames>=STARTUP_LAYOUT_FRAMES and ImGui.IsWindowHovered(ctx) then
@@ -4229,7 +4257,7 @@ function UI.note_drag_current()
   local drag=UI.note_drag
   if not drag or UI.drag_cancelled or drag.owner~=session or drag.epoch~=epoch
       or not session or session.doc~=drag.doc or session.error or session.conflict
-      or modal or tab_rename or UI.info or UI.place or bulk_selection or history_request or escape_pressed
+      or modal or UI.info or UI.place or bulk_selection or history_request or escape_pressed
       or startup_layout_frames<STARTUP_LAYOUT_FRAMES or not M.visible(drag.block,hide_completed) then return nil end
   return drag
 end
@@ -4279,8 +4307,8 @@ function UI.note_drag_handle(tab,column,block,sx,sy,bottom,gutter,first_line_cen
   ImGui.InvisibleButton(ctx,'##drag_note',width,height,ImGui.ButtonFlags_MouseButtonLeft)
   local color=ImGui.GetColor(ctx,ImGui.Col_TextDisabled)
   UI.draw_note_grip(ImGui.GetWindowDrawList(ctx),hx+width*0.5,center,width,height,color)
-  UI.item_tooltip(tr('Drag to move note'))
-  if not UI.drag_cancelled and not escape_pressed and not modal and not tab_rename and not UI.info and not history_request
+  ImGui.SetItemTooltip(ctx,tr('Drag to move note'))
+  if not UI.drag_cancelled and not escape_pressed and not modal and not UI.info and not history_request
       and startup_layout_frames>=STARTUP_LAYOUT_FRAMES and ImGui.BeginDragDropSource(ctx,0) then
     local drag=UI.note_drag_current()
     if not drag or drag.block~=block then
@@ -4288,7 +4316,7 @@ function UI.note_drag_handle(tab,column,block,sx,sy,bottom,gutter,first_line_cen
       drag={owner=session,epoch=epoch,doc=session.doc,column=column,block=block,
         token=tostring(epoch)..':'..tostring(block.id)..':'..UI.drag_sequence}
       UI.end_note_edit()
-      UI.note_drag=drag;UI.double_press=nil;UI.tab_press=nil
+      UI.note_drag=drag;UI.double_press=nil
       session.history.key=nil;session.input_state=nil;undo_boundary=true
     end
     ImGui.SetDragDropPayload(ctx,'P34_NOTE',drag.token,ImGui.Cond_Once)
@@ -4395,22 +4423,6 @@ function UI.note_drop_section(column,rects)
   end
   UI.note_drop_item(column,anchor,after,line_y,rects[1])
 end
--- The minimized-column restore button is an existing native widget.
--- Drop directly onto that widget, never create a second overlay item.
-function UI.note_drop_target(column)
-  local drag=UI.note_drag_current()
-  if not drag or not M.note_drop_plan(drag.doc,drag.block,column,nil,false,
-      completed_last,hide_completed) then return end
-  if ImGui.BeginDragDropTarget(ctx) then
-    local flags=ImGui.DragDropFlags_AcceptBeforeDelivery|ImGui.DragDropFlags_AcceptNoDrawDefaultRect
-    local accepted,token=ImGui.AcceptDragDropPayload(ctx,'P34_NOTE',nil,flags)
-    local active,kind,payload,_,delivery=ImGui.GetDragDropPayload(ctx)
-    if accepted and active and kind=='P34_NOTE' and token==drag.token and payload==drag.token and delivery then
-      UI.note_drop_commit(drag,column,nil,false)
-    end
-    ImGui.EndDragDropTarget(ctx)
-  end
-end
 function UI.note_drag_tab(tab,hovered)
   local drag=UI.note_drag_current()
   if not drag then return end
@@ -4430,11 +4442,11 @@ function UI.note_drag_scroll()
   local now=reaper.time_precise()
   local dt=math.min(0.05,math.max(0,now-(drag.scroll_time or now-1/60)))
   drag.scroll_time=now
-  local edge=math.min(36,height*0.2)
+  local edge=math.min(UI_METRICS.note_drag_scroll_edge,height*0.2)
   local step=my<y+edge and -(y+edge-my)/edge or my>y+height-edge and (my-y-height+edge)/edge or 0
   if step~=0 then
     local maximum=ImGui.GetScrollMaxY(ctx)
-    ImGui.SetScrollY(ctx,math.max(0,math.min(maximum,ImGui.GetScrollY(ctx)+step*360*dt)))
+    ImGui.SetScrollY(ctx,math.max(0,math.min(maximum,ImGui.GetScrollY(ctx)+step*UI_METRICS.note_drag_scroll_speed*dt)))
   end
 end
 
@@ -4596,28 +4608,64 @@ function UI.heading_text(text,width,height,show_tooltip)
     ImGui.PopClipRect(ctx)
   end
   local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
-  if show_tooltip~=false then UI.item_tooltip(text) end
+  if show_tooltip~=false then ImGui.SetItemTooltip(ctx,text) end
   return hovered
 end
--- Group actions are plain dots; the invisible native item keeps a stable
--- mouse/keyboard hitbox without showing a framed button.  All three circles
--- are drawn in the current font-independent UI coordinate system.
-function UI.group_menu_dots(width,height)
-  local sx,sy=ImGui.GetCursorScreenPos(ctx)
-  local clicked=ImGui.InvisibleButton(ctx,'##section_actions_dots',math.max(1,width),math.max(1,height),
-    ImGui.ButtonFlags_MouseButtonLeft|ImGui.ButtonFlags_EnableNav)
+-- Align both group and note menus to the right edge of their shared
+-- content guide. Native tables and SameLine use different local origins;
+-- button placement must not depend on those origins or their padding.
+function UI.trailing_action_left(right,width) return right-width end
+-- One theme-aware dot painter for groups and notes. Caller supplies the
+-- current-frame hitbox; the layout container never affects visual geometry.
+function UI.paint_menu_dots(sx,sy,width,height,color)
   local m=UI_METRICS
   local radius=math.max(0.5,math.min(m.group_menu_dot_radius,height*0.25,width/8))
   local spacing=math.max(2*radius+1,math.min(m.group_menu_dot_spacing,(width-2*radius)*0.5))
-  -- Keep all three dots inside the hitbox even in a narrow Docker.
-  local max_left_shift=math.max(0,width*0.5-spacing-radius-1)
-  local cx,cy=sx+width*0.5-math.min(m.group_menu_dots_right_inset,max_left_shift),sy+height*0.5
-  local color=ImGui.GetColor(ctx,ImGui.Col_Text)
+  local cx,cy=sx+width*0.5,sy+height*0.5
+  local tint=color or ImGui.GetColor(ctx,ImGui.Col_Text)
   local dl=ImGui.GetWindowDrawList(ctx)
   for i=-1,1 do
-    ImGui.DrawList_AddCircleFilled(dl,cx+i*spacing,cy,radius,color,12)
+    ImGui.DrawList_AddCircleFilled(dl,cx+i*spacing,cy,radius,tint,12)
   end
+end
+function UI.group_menu_dots(width,height,id)
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  width,height=math.max(1,width),math.max(1,height)
+  local clicked=ImGui.InvisibleButton(ctx,id or '##section_actions_dots',width,height,
+    ImGui.ButtonFlags_MouseButtonLeft|ImGui.ButtonFlags_EnableNav)
+  UI.paint_menu_dots(sx,sy,width,height)
   return clicked
+end
+-- The quick-add icon is the standard Lucide circle-plus mask. The SVG's
+-- circle/plus geometry and stroke are not reconstructed using draw-list lines.
+function UI.group_add_checkbox_button(section,width,empty)
+  local m=UI_METRICS
+  local side=m.group_add_note_size
+  if width<side then return end
+  local sx,sy=ImGui.GetCursorScreenPos(ctx)
+  local top_gap=empty and m.group_add_note_empty_top_gap or m.group_add_note_top_gap
+  local x=sx+(width-side)*0.5
+  local y=sy+top_gap
+  ImGui.SetCursorScreenPos(ctx,x,y)
+  local clicked=ImGui.InvisibleButton(ctx,'##group_add_checkbox',side,side,
+    ImGui.ButtonFlags_MouseButtonLeft|ImGui.ButtonFlags_EnableNav)
+  local hovered=ImGui.IsItemHovered(ctx)
+  -- Apply theme-aware opacity to the Lucide mask, leaving the native 36px
+  -- click target intact even though the visible mark is smaller and lighter.
+  local base_color=ImGui.GetColor(ctx,hovered and ImGui.Col_Text or ImGui.Col_TextDisabled)
+  local opacity=hovered and m.group_add_note_hover_alpha or m.group_add_note_idle_alpha
+  local color=placement_alpha(base_color,opacity)
+  local icon=UI.icon_image('circle_plus')
+  local icon_side=math.min(side,m.group_add_note_icon_size)
+  local offset=(side-icon_side)*0.5
+  ImGui.DrawList_AddImage(ImGui.GetWindowDrawList(ctx),icon,
+    x+offset,y+offset,x+offset+icon_side,y+offset+icon_side,0,0,1,1,color)
+  ImGui.SetItemTooltip(ctx,tr('Add checkbox note'))
+  -- Register bottom padding as a native item, so the next group's heading
+  -- cannot overlap the button even in a small/docked viewport.
+  ImGui.SetCursorScreenPos(ctx,sx,y+side)
+  ImGui.Dummy(ctx,0,m.group_add_note_bottom_gap)
+  if clicked then add_from_menu('note',section) end
 end
 local function column_header(board,section,index,actions_right)
   ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
@@ -4630,7 +4678,7 @@ local function column_header(board,section,index,actions_right)
   -- Use the same absolute button edge in both child windows.
   -- A single right edge for heading background, title, and trailing menu.
   -- Keep the optional inset in the layout itself, not only in the drawing.
-  local width=math.max(1,math.min(content_w,actions_right-sx)-UI_METRICS.group_header_right_inset)
+  local width=math.max(1,math.min(content_w,actions_right-sx))
   local heading_right=sx+width
   local menu_w,height=UI.button_size('...')
   local gap=UI_METRICS.tab_heading_menu_gap
@@ -4678,14 +4726,10 @@ local function column_header(board,section,index,actions_right)
   ImGui.PopFont(ctx)
   if show_menu then
     ImGui.SameLine(ctx,0,gap)
-    local mx,my=ImGui.GetMousePos(ctx)
-    local header_hover=ImGui.IsWindowHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
-      and mx>=sx and mx<heading_right and my>=sy and my<sy+height
-    if header_hover or ImGui.IsPopupOpen(ctx,'section_actions') then
-      if UI.group_menu_dots(menu_w,height) then ImGui.OpenPopup(ctx,'section_actions') end
-    else
-      ImGui.Dummy(ctx,menu_w,height)
-    end
+    ImGui.SetCursorScreenPos(ctx,UI.trailing_action_left(heading_right,menu_w),sy)
+    -- Keep the menu's native ID and hitbox stable even when the pointer is
+    -- elsewhere. Rendering a Dummy in its place would break keyboard focus.
+    if UI.group_menu_dots(menu_w,height) then ImGui.OpenPopup(ctx,'section_actions') end
   end
   ImGui.EndGroup(ctx)
   local hovered=ImGui.IsItemHovered(ctx,ImGui.HoveredFlags_AllowWhenBlockedByActiveItem)
@@ -4755,7 +4799,7 @@ function UI.queue_tab_reorder(id,before)
 end
 function UI.tab_gesture_valid(press)
   return press and press.owner==session and press.doc==session.doc and press.epoch==epoch
-    and not session.error and not session.conflict and not modal and not tab_rename
+    and not session.error and not session.conflict and not modal
     and not UI.info and not UI.place and not bulk_selection and not history_request
     and not escape_pressed and not UI.note_drag_current()
     and startup_layout_frames>=STARTUP_LAYOUT_FRAMES
@@ -4780,8 +4824,6 @@ function UI.tabs_strip()
   local right_inset=math.min(m.tabs_actions_right_inset,math.max(0,available-controls_w))
   local strip_h=math.max(m.tabs_strip_height,side+2*m.tabs_strip_pad_y)
   -- Read the shared action edge, but clamp against the CURRENT window width.
-  -- ReaImGui auto-ends a false BeginChild. End only the true branch;
-  -- otherwise the parent epoch ID is still open when EndChild checks it.
   local fallback_right=sx+available-right_inset
   local menu_right=math.min(fallback_right,UI.shared_actions_right or fallback_right)
   menu_right=math.max(sx+controls_w,menu_right)
@@ -4835,7 +4877,7 @@ function UI.tabs_strip()
       end
       local press=UI.tab_gesture
       if press and press.id==board.id and ImGui.IsItemActive(ctx)
-          and ImGui.IsMouseDragging(ctx,0,m.tabs_drag_threshold) then
+          and ImGui.IsMouseDragging(ctx,0,m.pointer_drag_threshold) then
         if not press.dragging then UI.end_note_edit();UI.double_press=nil end
         press.dragging=true
       end
@@ -4897,11 +4939,11 @@ function UI.tabs_strip()
           ImGui.GetScrollX(ctx)+direction*m.tabs_drag_scroll_speed*dt)))
       else press.scroll_time=nil end
     end
-    ImGui.EndChild(ctx)
   elseif UI.tab_gesture then
     -- A clipped strip cannot accept a release during a docking/resize frame.
     if ImGui.IsMouseReleased(ctx,0) then UI.tab_gesture=nil end
   end
+  ImGui.EndChild(ctx)
   if ImGui.IsMouseReleased(ctx,0) or not ImGui.IsMouseDown(ctx,0) then UI.tab_gesture=nil end
   -- Draw tab controls in the parent, never under the scrolling child ID.
   local control_y=sy+(strip_h-side)*0.5
@@ -4909,9 +4951,9 @@ function UI.tabs_strip()
   local add_x=menu_x-gap-side
   ImGui.SetCursorScreenPos(ctx,add_x,control_y)
   ImGui.BeginDisabled(ctx,#session.doc.tabs>=8)
-  if UI.source_button('add_page','+',side,side) then add_tab() end
+  if UI.source_button('add_page','+',side,side) then add_column() end
   ImGui.EndDisabled(ctx)
-  UI.item_tooltip(tr('New tab'))
+  ImGui.SetItemTooltip(ctx,tr('New tab'))
   ImGui.SetCursorScreenPos(ctx,menu_x,control_y)
   if UI.source_button('page_actions','...',side,side) then ImGui.OpenPopup(ctx,'page_actions') end
   if begin_action_popup('page_actions') then
@@ -4999,7 +5041,7 @@ local function draw_document()
             end
           end
           if #order==0 then
-            ImGui.TextDisabled(ctx,tr(#section.blocks==0 and 'No notes yet' or 'Completed items hidden'))
+            if #section.blocks>0 then ImGui.TextDisabled(ctx,tr('Completed items hidden')) end
             ImGui.Dummy(ctx,0,placing and UI_METRICS.empty_tab_placement_height or UI_METRICS.inner_gap)
             local _,empty_bottom=ImGui.GetItemRectMax(ctx)
             placement_visual={x=body_x,y=body_y,width=body_width,bottom=empty_bottom}
@@ -5008,6 +5050,13 @@ local function draw_document()
             placement_visual={x=first.x,y=first.y,width=first.width,bottom=last.bottom}
           end
           ImGui.PopFont(ctx)
+          if not placing and not bulk_selection and not UI.note_drag_current() then
+            -- A group-local action, independent of the active-group selector.
+            -- The full hitbox is part of the group's measured height.
+            local quick_x=ImGui.GetCursorScreenPos(ctx)
+            local quick_width=math.max(0,math.min(body_width,actions_right-quick_x))
+            UI.group_add_checkbox_button(section,quick_width,#order==0)
+          end
           ImGui.Unindent(ctx,UI_METRICS.inner_gap+UI_METRICS.note_row_inset_x)
         end
         ImGui.EndGroup(ctx)
@@ -5024,11 +5073,11 @@ local function draw_document()
       UI.note_drag_scroll()
       ImGui.Unindent(ctx,UI_METRICS.inner_gap)
       UI.overlay_scroll_thumb(board)
-      ImGui.EndChild(ctx) -- page_body
     end
+    ImGui.EndChild(ctx) -- page_body, including clipped frames
     ImGui.PopID(ctx)
-    ImGui.EndChild(ctx) -- active_page_panel
   end
+  ImGui.EndChild(ctx) -- active_page_panel, including clipped frames
   if session.pending then local fn=session.pending;session.pending=nil;fn() end
 end
 
@@ -5063,7 +5112,8 @@ local function draw_modal()
     ImGui.Text(ctx,tr(m.kind=='delete' and 'Confirm deletion' or m.title));ImGui.Separator(ctx)
     local primary=m.kind=='delete' and 'Delete' or m.kind=='import' and 'Import' or m.kind=='restore' and 'Restore' or 'Apply'
     local enter=false
-    if UI.popup_body('editor_body',tr(primary)) then
+    local body_visible=UI.popup_body('editor_body',tr(primary))
+    if body_visible then
       if m.kind=='restore' then
         ImGui.TextWrapped(ctx,tr('This replaces all notes of the current owner. Review the copy; it may contain an incomplete operation. Undo is available after restoration.'))
         ImGui.TextWrapped(ctx,UI.owner_title(session.target))
@@ -5101,7 +5151,7 @@ local function draw_modal()
           ImGui.TextWrapped(ctx,tr('Paste text or a numbered list on the left. The notes to be added appear on the right.'))
           ImGui.TextWrapped(ctx,tr('Separate paragraphs with a blank line. In a numbered list, start each new item on a new line.'))
           if m.timecodes then
-            ImGui.TextWrapped(ctx,tr('Timecodes: MM:SS, HH:MM:SS or HH:MM:SS:FF (project FPS); optional milliseconds without frames. Double-click the clock/time indicator to jump.'))
+            ImGui.TextWrapped(ctx,tr('Timecodes: MM:SS, HH:MM:SS or HH:MM:SS:FF (project FPS); optional milliseconds without frames. Click the clock/time indicator to jump and focus arrange.'))
           end
           ImGui.Dummy(ctx,0,0)
           ImGui.TableNextRow(ctx)
@@ -5127,8 +5177,8 @@ local function draw_modal()
               ImGui.PopStyleColor(ctx)
             end
             for i,text in ipairs(m.preview) do ImGui.TextWrapped(ctx,i..'. '..text);ImGui.Separator(ctx) end
-            ImGui.EndChild(ctx)
           end
+          ImGui.EndChild(ctx)
           ImGui.EndTable(ctx)
         end
       elseif m.kind=='delete' then
@@ -5165,12 +5215,12 @@ local function draw_modal()
             ImGui.EndDisabled(ctx);ImGui.PopID(ctx)
           end
           if action then action() end
-          ImGui.EndChild(ctx)
         end
+        ImGui.EndChild(ctx)
         if UI.button(ctx,ui_label('+ Option')) then m.options[#m.options+1]=tr('New option') end
       end
-      ImGui.EndChild(ctx)
     end
+    ImGui.EndChild(ctx) -- editor_body, including clipped frames
     -- The action row belongs to the popup, outside its scrollable body.
     local valid=true
     if m.kind=='new_tab' or m.kind=='rename_column' then valid=m.value:match('%S')~=nil
@@ -5205,9 +5255,9 @@ local function draw_modal()
         m.target.label=m.label;m.target.options=m.options;m.target.selected=m.selected
       end
       if m.kind~='delete' then
-        local action=({new_tab='add_tab',import='import',select='edit_dropdown',restore='restore'})[m.kind]
+        local action=({new_tab='add_tab',rename_column='rename_column',import='import',select='edit_dropdown',restore='restore'})[m.kind]
         if m.kind=='rename_column' then
-          action=m.title=='Rename tab' and 'rename_tab' or 'rename_group'
+          action=m.title=='Rename group' and 'rename_group' or m.title=='Rename tab' and 'rename_tab' or action
         end
         touch(nil,action)
       end
@@ -5315,25 +5365,19 @@ local function scope_selector()
     end
     ImGui.EndCombo(ctx)
   end
-  -- Move the complete font control to a new row when its measured width will
-  -- not fit. Reserve the widest readout so dragging does not reflow the toolbar.
+  -- Exactly the same native SliderInt style/number placement as the
+  -- separator-spacing control; the formatted value stays inside the track.
   local label_w=ImGui.CalcTextSize(ctx,tr('Font'))
-  local value_w=0
-  for n=UI_METRICS.note_text_min_size,UI_METRICS.note_text_max_size do value_w=math.max(value_w,(ImGui.CalcTextSize(ctx,tostring(n)..tr(' px')))) end
-  local fixed_w=label_w+value_w+2*UI_METRICS.inner_gap
-  local slider_w=math.max(UI_METRICS.slider_min_width,
-    math.min(UI_METRICS.slider_width,row.width-fixed_w))
-  UI.toolbar_right(row,fixed_w+slider_w)
+  local gap=UI_METRICS.inner_gap
+  local slider_w=math.max(UI_METRICS.font_slider_min_width,
+    math.min(UI_METRICS.slider_width,row.width-label_w-gap))
+  UI.toolbar_right(row,label_w+gap+slider_w)
   ImGui.AlignTextToFramePadding(ctx)
-  ImGui.Text(ctx,tr('Font'));ImGui.SameLine(ctx,0,UI_METRICS.inner_gap)
-  local rv,value=UI.slider('font',size,UI_METRICS.note_text_min_size,
-    UI_METRICS.note_text_max_size,slider_w,UI_METRICS.note_text_default_size)
-  local value_caption=tostring(value)..tr(' px')
-  local caption_w=ImGui.CalcTextSize(ctx,value_caption)
-  ImGui.SameLine(ctx,0,UI_METRICS.inner_gap+value_w-caption_w)
-  ImGui.AlignTextToFramePadding(ctx)
-  ImGui.TextDisabled(ctx,value_caption)
-  if rv then size=value; pref('size',size) end
+  ImGui.Text(ctx,tr('Font'));ImGui.SameLine(ctx,0,gap)
+  ImGui.SetNextItemWidth(ctx,slider_w)
+  local rv,value=ImGui.SliderInt(ctx,'##font_size',size,
+    UI_METRICS.note_text_min_size,UI_METRICS.note_text_max_size,'%d px')
+  if rv then size=value;pref('size',size) end
   return switched
 end
 local function header_context()
@@ -5350,48 +5394,6 @@ local function header_context()
     ImGui.EndPopup(ctx)
   end
 end
--- Commit any pending editor draft before applying history. Normal in-frame
--- changes continue to use this same write path after rendering.
-local function commit_frame_changes(before)
-  if not (changed and session) then return end
-  session.dirty=true
-  local ok,err=M.write(session,api)
-  if not ok then
-    session.error=err;save_recovery(session,err,before and before.raw)
-  else
-    if session.restore_pending then before.allow_invalid=true;session.restore_pending=nil end
-    session.history_readonly=nil
-    M.history_record(session.history,before,session.raw,edit_key,reaper.time_precise(),edit_action)
-    session.undo_due=reaper.time_precise()+0.8
-  end
-  -- A draft committed before Undo must not be recorded a second time
-  -- when the rest of this frame is rendered.
-  changed=false;edit_key=nil;edit_action=nil
-end
-
-local function apply_history_request(before)
-  local direction=history_request
-  history_request=nil
-  if not direction or not can_history(direction) then return false end
-  flush_undo(session)
-  local ok,err=M.history_step(session,api,direction)
-  if ok then
-    epoch=epoch+1;bulk_selection=nil;modal=nil;open_modal=nil;tab_rename=nil;session.pending=nil
-    force_tab=session.doc and active_tab().id or nil
-    -- These interactions belonged to the previous document generation.
-    -- Invalidate them now, before this frame draws the restored notes.
-    if UI.place then UI.place=nil;UI.place_cancelled=true end
-    if UI.note_drag then UI.note_drag=nil;UI.drag_cancelled=true end
-    UI.tab_gesture=nil;UI.tab_press=nil;UI.column_press=nil
-    reaper.Undo_OnStateChangeEx2(session.proj,
-      direction<0 and 'Undo '..session.target.kind..' notes' or 'Redo '..session.target.kind..' notes',
-      session.target.undo_flags,-1)
-  elseif err then
-    session.error=err;save_recovery(session,err,before and before.raw)
-  end
-  return ok
-end
-
 local function frame()
   frame_checkpoint=nil
   changed=false; undo_boundary=false; edit_key=nil; edit_action=nil; history_request=nil
@@ -5404,7 +5406,7 @@ local function frame()
   if UI.place and not UI.place_valid(UI.place) then UI.place=nil;UI.place_cancelled=true end
   if pending_language then
     language=pending_language;pending_language=nil;pref('language',language)
-    modal=nil;open_modal=nil;tab_rename=nil;UI.info=nil;UI.menu_open=nil
+    modal=nil;open_modal=nil;UI.info=nil;UI.menu_open=nil
   end
   if pending_theme then
     theme=pending_theme;pending_theme=nil;pref('theme',theme)
@@ -5419,11 +5421,6 @@ local function frame()
   if not ctx then
     ctx=ImGui.CreateContext(CONTEXT_NAME,ImGui.ConfigFlags_DockingEnable|ImGui.ConfigFlags_NavEnableKeyboard)
     ImGui.SetConfigVar(ctx,ImGui.ConfigVar_InputTextCursorBlink,1)
-    -- Native SetItemTooltip uses these per-context settings: 0.4s with
-    -- a fresh delay for each item instead of sharing it between buttons.
-    ImGui.SetConfigVar(ctx,ImGui.ConfigVar_HoverDelayNormal,UI_METRICS.tooltip_delay)
-    ImGui.SetConfigVar(ctx,ImGui.ConfigVar_HoverFlagsForTooltipMouse,
-      ImGui.HoveredFlags_DelayNormal|ImGui.HoveredFlags_NoSharedDelay|ImGui.HoveredFlags_AllowWhenDisabled)
     font=ImGui.CreateFont(UI_METRICS.font_family)
     ImGui.Attach(ctx,font)
     -- A real bold face (not a duplicated text shadow) for column names.
@@ -5437,7 +5434,7 @@ local function frame()
   local warming=startup_layout_frames<STARTUP_LAYOUT_FRAMES
   -- A tiny nonzero alpha quantizes to transparent, but still allows ImGui to
   -- measure children (Alpha==0 may skip their layout). Viewer startup pattern.
-  if warming then ImGui.PushStyleVar(ctx,ImGui.StyleVar_Alpha,0.001) end
+  if warming then ImGui.PushStyleVar(ctx,ImGui.StyleVar_Alpha,UI_METRICS.startup_layout_warmup_alpha) end
   local nc,nv=styles()
   ImGui.PushFont(ctx,ui_font,UI_METRICS.font_size)
   ImGui.SetNextWindowSize(ctx,UI_METRICS.window_initial_width,UI_METRICS.window_initial_height,ImGui.Cond_Once)
@@ -5456,24 +5453,13 @@ local function frame()
     UI.note_drag_update()
     UI.place_update()
     UI.note_edit_update()
-    if not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0) then UI.double_press=nil;UI.tab_press=nil;UI.column_press=nil end
+    if not ImGui.IsMouseDown(ctx,0) and not ImGui.IsMouseReleased(ctx,0) then
+      UI.double_press=nil;UI.column_press=nil;UI.timecode_press=nil
+    end
     if warming then ImGui.BeginDisabled(ctx,true) else history_shortcuts() end
     menu_bar()
     local switching=scope_selector()
-    if switching or history_request or modal or tab_rename or UI.info then UI.end_note_edit() end
-    if history_request then
-      -- Commands are selected during menu_bar/history_shortcuts. Applying
-      -- them only after ImGui.End drew the old document one frame too long.
-      commit_frame_changes(before)
-      local applied=apply_history_request(before)
-      if applied then
-        -- The previous epoch was pushed before menu_bar. Re-scope the
-        -- document widgets now so both the data and ImGui IDs agree.
-        ImGui.PopID(ctx)
-        ImGui.PushID(ctx,epoch)
-      end
-      before=session and {raw=session.raw,active=session.active,allow_invalid=session.history_readonly} or nil
-    end
+    if switching or history_request or modal or UI.info then UI.end_note_edit() end
     header_context()
     if switching then UI.place=nil else UI.creation_toolbar() end
     if switching then ImGui.TextDisabled(ctx,tr('Switching note owner...'))
@@ -5490,8 +5476,8 @@ local function frame()
     ImGui.PopID(ctx)
     draw_modal()
     draw_note_cancel_popup()
-    ImGui.End(ctx)
   end
+  ImGui.End(ctx) -- Begin requires End even when the window is collapsed
   if not opened and UI.note_edit then UI.end_note_edit() end
   ImGui.PopFont(ctx); ImGui.PopStyleVar(ctx,nv); ImGui.PopStyleColor(ctx,nc)
   if warming then
@@ -5500,9 +5486,31 @@ local function frame()
     startup_layout_frames=startup_layout_frames+1
     ImGui.PopStyleVar(ctx)
   end
-  commit_frame_changes(before)
+  if changed and session then
+    session.dirty=true
+    local ok,err=M.write(session,api)
+    if not ok then
+      session.error=err;save_recovery(session,err,before and before.raw)
+    else
+      if session.restore_pending then before.allow_invalid=true;session.restore_pending=nil end
+      session.history_readonly=nil
+      M.history_record(session.history,before,session.raw,edit_key,reaper.time_precise(),edit_action)
+      session.undo_due=reaper.time_precise()+0.8
+    end
+  end
   if session and (undo_boundary or not UI.note_edit) then session.history.key=nil end
   if session and (undo_boundary or (session.undo_due and reaper.time_precise()>=session.undo_due)) then flush_undo(session) end
+  if history_request and can_history(history_request) then
+    flush_undo(session)
+    local ok,err=M.history_step(session,api,history_request)
+    if ok then
+      epoch=epoch+1; bulk_selection=nil; modal=nil; open_modal=nil; session.pending=nil
+      force_tab=session.doc and active_tab().id or nil
+      reaper.Undo_OnStateChangeEx2(session.proj,history_request<0 and 'Undo '..session.target.kind..' notes' or 'Redo '..session.target.kind..' notes',session.target.undo_flags,-1)
+    elseif err then
+      session.error=err;save_recovery(session,err,before and before.raw)
+    end
+  end
   return opened
 end
 local function exit()
