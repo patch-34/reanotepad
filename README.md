@@ -15,6 +15,10 @@ ReaNotepad is a single-file Lua notes editor for REAPER projects, tracks, and me
 
 The [Patch34 ReaPack repository](https://raw.githubusercontent.com/patch-34/patch34-reapack/main/index.xml) is maintained separately and may show a different version until its index is updated.
 
+### Docking and resizing (v0.7.1)
+
+Version 0.7.1 fixes a ReaImGui window-scope crash that could occur when moving ReaNotepad between Docker positions or undocking it. It also guards note layout calculations against negative available width in very narrow dock panels. To upgrade, replace the existing `ReaNotepad.lua` at the same path.
+
 ## Documents and storage
 
 | Scope | Owner | Storage |
@@ -64,7 +68,7 @@ Undo/Redo supports text edits, checkboxes, dropdowns, imports, colors, tab/group
 
 If native notes change externally during an edit, automatic writes pause rather than overwrite them. Invalid or unknown structured formats open read-only. Inspect recovery files under `Data/Patch34_Project_Notes_Recovery/` and restore using **Edit → Open recovery copy…**.
 
-**Version 0.7.0 continues to write document format v3** (`# Patch34 Project Notes v3`). Legacy v1/v2 documents and plain project notes remain readable. Track storage keys, preference keys, window identifiers and recovery paths have *not* been renamed. Older scripts may not edit documents saved in v3.
+**Version 0.7.1 continues to write document format v3** (`# Patch34 Project Notes v3`). Legacy v1/v2 documents and plain project notes remain readable. Track storage keys, preference keys, window identifiers and recovery paths have *not* been renamed. Older scripts may not edit documents saved in v3.
 
 ## License and credits
 

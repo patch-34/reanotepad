@@ -1,9 +1,12 @@
 -- @description ReaNotepad
--- @version 0.7.0
+-- @version 0.7.1
 -- @author Aleksei Vorobev / Patch34
 -- @link
 --   GitHub repository https://github.com/patch-34/reanotepad
 -- @changelog
+--   Fix ReaImGui Begin/End scope handling when docking or undocking windows.
+--   Match EndChild calls to successful BeginChild returns across all child windows.
+--   Prevent negative note-shell widths when the Docker is narrowed below the content minimum.
 --   Release 0.7.0: shared note/group action alignment and frameless menus.
 --   Add group quick-add checkbox note and note checkbox toggle actions.
 --   Unify font/spacing sliders, timecode navigation and timeline focus.
@@ -34,7 +37,7 @@
 --                        https://cfillion.ca/reaper_imgui_doc.html
 
 local M = {}
-local VERSION = '0.7.0'
+local VERSION = '0.7.1'
 -- ============================================================================
 -- UI SETTINGS / НАСТРОЙКИ ИНТЕРФЕЙСА                        EDIT HERE
 -- ============================================================================
@@ -2713,7 +2716,9 @@ function UI.wrapped_editor(m,height,id,save_on_enter)
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,pad_x+UI_METRICS.editor_extra_pad_x,pad_y+UI_METRICS.editor_extra_pad_y)
   local visible=ImGui.BeginChild(ctx,id or 'import_source_wrapped',0,height,ImGui.ChildFlags_Borders)
   ImGui.PopStyleVar(ctx);ImGui.PopStyleColor(ctx)
-  if not visible then ImGui.EndChild(ctx); return false,m.value end
+  -- In ReaImGui (unlike raw Dear ImGui), a false BeginChild does not
+  -- open a scope. Do not call EndChild when the child is clipped.
+  if not visible then return false,m.value end
   local origin_x,origin_y=ImGui.GetCursorScreenPos(ctx)
   local window_x,window_y=ImGui.GetWindowPos(ctx)
   local window_w,window_h=ImGui.GetWindowSize(ctx)
@@ -3303,8 +3308,8 @@ function UI.info_window()
           UI.open_url('https://github.com/patch-34')
         end
       end
+      ImGui.EndChild(ctx)
     end
-    ImGui.EndChild(ctx)
     -- Same button geometry as other dialogs, with Viewer's About-button skin.
     local close_w,close_h=UI.button_size(tr('Close'))
     local close_x,close_y=ImGui.GetCursorScreenPos(ctx)
@@ -4128,7 +4133,10 @@ function UI.note_padding(height)
 end
 local function draw_marked_block(tab,column,b,index,actions_right)
   local sx,sy=ImGui.GetCursorScreenPos(ctx)
-  local width=math.min(ImGui.GetContentRegionAvail(ctx),math.max(1,actions_right-sx))
+  -- A severely narrowed dock can leave a negative available width after
+  -- the group's and note's native indents. Keep the same positive-width
+  -- contract as draw_block(), selection_toolbar() and draw_selection_block().
+  local width=math.max(1,math.min(ImGui.GetContentRegionAvail(ctx),actions_right-sx))
   local selecting=bulk_selection and bulk_selection.column==column
   ImGui.PushID(ctx,b.id)
   local completed=M.completed(b)
@@ -4851,6 +4859,7 @@ function UI.tabs_strip()
   ImGui.PushStyleVar(ctx,ImGui.StyleVar_WindowPadding,0,0)
   ImGui.PushStyleColor(ctx,ImGui.Col_ChildBg,0x00000000)
   ImGui.SetNextWindowContentSize(ctx,total,0)
+  -- Match each successful ReaImGui BeginChild with exactly one EndChild.
   local visible=ImGui.BeginChild(ctx,'page_tabs',list_width,strip_h,0,
     ImGui.WindowFlags_HorizontalScrollbar)
   ImGui.PopStyleColor(ctx);ImGui.PopStyleVar(ctx)
@@ -4939,11 +4948,11 @@ function UI.tabs_strip()
           ImGui.GetScrollX(ctx)+direction*m.tabs_drag_scroll_speed*dt)))
       else press.scroll_time=nil end
     end
+    ImGui.EndChild(ctx)
   elseif UI.tab_gesture then
     -- A clipped strip cannot accept a release during a docking/resize frame.
     if ImGui.IsMouseReleased(ctx,0) then UI.tab_gesture=nil end
   end
-  ImGui.EndChild(ctx)
   if ImGui.IsMouseReleased(ctx,0) or not ImGui.IsMouseDown(ctx,0) then UI.tab_gesture=nil end
   -- Draw tab controls in the parent, never under the scrolling child ID.
   local control_y=sy+(strip_h-side)*0.5
@@ -5073,11 +5082,11 @@ local function draw_document()
       UI.note_drag_scroll()
       ImGui.Unindent(ctx,UI_METRICS.inner_gap)
       UI.overlay_scroll_thumb(board)
+      ImGui.EndChild(ctx) -- page_body: only if BeginChild returned true
     end
-    ImGui.EndChild(ctx) -- page_body, including clipped frames
     ImGui.PopID(ctx)
+    ImGui.EndChild(ctx) -- active_page_panel: only if BeginChild returned true
   end
-  ImGui.EndChild(ctx) -- active_page_panel, including clipped frames
   if session.pending then local fn=session.pending;session.pending=nil;fn() end
 end
 
@@ -5177,8 +5186,8 @@ local function draw_modal()
               ImGui.PopStyleColor(ctx)
             end
             for i,text in ipairs(m.preview) do ImGui.TextWrapped(ctx,i..'. '..text);ImGui.Separator(ctx) end
+            ImGui.EndChild(ctx)
           end
-          ImGui.EndChild(ctx)
           ImGui.EndTable(ctx)
         end
       elseif m.kind=='delete' then
@@ -5215,12 +5224,12 @@ local function draw_modal()
             ImGui.EndDisabled(ctx);ImGui.PopID(ctx)
           end
           if action then action() end
+          ImGui.EndChild(ctx)
         end
-        ImGui.EndChild(ctx)
         if UI.button(ctx,ui_label('+ Option')) then m.options[#m.options+1]=tr('New option') end
       end
+      ImGui.EndChild(ctx) -- editor_body: only if BeginChild returned true
     end
-    ImGui.EndChild(ctx) -- editor_body, including clipped frames
     -- The action row belongs to the popup, outside its scrollable body.
     local valid=true
     if m.kind=='new_tab' or m.kind=='rename_column' then valid=m.value:match('%S')~=nil
@@ -5476,8 +5485,11 @@ local function frame()
     ImGui.PopID(ctx)
     draw_modal()
     draw_note_cancel_popup()
+    -- ReaImGui Begin/End differs from the raw Dear ImGui C++ contract:
+    -- when a docked window is clipped/reparented, Begin can return false
+    -- without opening a scope. End must be inside the visible branch.
+    ImGui.End(ctx)
   end
-  ImGui.End(ctx) -- Begin requires End even when the window is collapsed
   if not opened and UI.note_edit then UI.end_note_edit() end
   ImGui.PopFont(ctx); ImGui.PopStyleVar(ctx,nv); ImGui.PopStyleColor(ctx,nc)
   if warming then

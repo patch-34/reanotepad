@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 — 2026-11-12
+
+- Fixed an intermittent ReaImGui `End(): Calling End() too many times!` crash when the ReaNotepad window was moved between Docker positions or undocked.
+- Match each `End()` / `EndChild()` only to a successful `Begin()` / `BeginChild()` return, including clipped and hidden windows. This follows ReaImGui's Lua binding behavior.
+- Clamp note-shell width to a positive value when the Docker is narrowed beyond the content's minimum width.
+- No changes to the document format (v3), storage keys, note data, or Undo/Redo behavior.
+
+
 ## 0.7.0 — 2026-11-10
 
 - Replaced note color shortcut with a common frameless three-dot actions menu, matching group actions. Included color changes and checkbox add/remove actions.
